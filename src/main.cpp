@@ -1,5 +1,7 @@
 #include "ecs.hpp"
 #include "fps_camera.hpp"
+#include "level_loader.hpp"
+#include "lit_vertex.hpp"
 #include "physics_world.hpp"
 #include "shader_program.hpp"
 #include "texture_loader.hpp"
@@ -15,10 +17,16 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
+#include <string>
 #include <vector>
 
 #ifndef ENGINE_TEXTURES_DIR
 #define ENGINE_TEXTURES_DIR "textures"
+#endif
+
+#ifndef ENGINE_MAPS_DIR
+#define ENGINE_MAPS_DIR "maps"
 #endif
 
 namespace {
@@ -70,44 +78,9 @@ void window_pixel_size(SDL_Window* window, int* out_w, int* out_h)
 #endif
 }
 
-struct LitVertex {
-	float x = 0.0f;
-	float y = 0.0f;
-	float z = 0.0f;
-	float nx = 0.0f;
-	float ny = 1.0f;
-	float nz = 0.0f;
-	float u = 0.0f;
-	float v = 0.0f;
-	uint32_t abgr = 0xffffffff;
-};
-
-static constexpr uint32_t k_platform_color_abgr = 0xffffffffu;
-static constexpr float k_floor_uv_per_world = 1.0f / 6.0f;
-
-static LitVertex k_platform_vertices[] = {
-	{-engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, k_platform_color_abgr},
-	{ engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
-		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
-		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
-		k_platform_color_abgr},
-	{ engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
-		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
-		0.0f,
-		k_platform_color_abgr},
-	{-engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, k_platform_color_abgr},
-	{-engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
-		0.0f,
-		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
-		k_platform_color_abgr},
-	{ engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
-		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
-		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
-		k_platform_color_abgr},
-};
-
 static constexpr float k_sphere_radius = 1.35f;
 static constexpr uint32_t k_sphere_color_abgr = 0xff8877ddu;
+static constexpr float k_wall_height = 3.2f;
 
 static void build_uv_sphere(
 	std::vector<LitVertex>& vertices,
@@ -157,6 +130,81 @@ static void build_uv_sphere(
 			indices.push_back(d);
 		}
 	}
+}
+
+bool first_floor_spawn(const engine::LoadedLevel& level, float& out_x, float& out_z)
+{
+	for (int r = 0; r < level.height; ++r) {
+		for (int c = 0; c < level.width; ++c) {
+			if (level.is_floor(c, r)) {
+				level.cell_center_world(c, r, out_x, out_z);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool floor_centroid(const engine::LoadedLevel& level, float& out_x, float& out_z)
+{
+	double sx = 0.0;
+	double sz = 0.0;
+	int n = 0;
+	for (int r = 0; r < level.height; ++r) {
+		for (int c = 0; c < level.width; ++c) {
+			if (level.is_floor(c, r)) {
+				float wx = 0.0f;
+				float wz = 0.0f;
+				level.cell_center_world(c, r, wx, wz);
+				sx += static_cast<double>(wx);
+				sz += static_cast<double>(wz);
+				++n;
+			}
+		}
+	}
+	if (n == 0) {
+		return false;
+	}
+	out_x = static_cast<float>(sx / static_cast<double>(n));
+	out_z = static_cast<float>(sz / static_cast<double>(n));
+	return true;
+}
+
+void nearest_light(
+	const engine::LoadedLevel& level,
+	float ex,
+	float ey,
+	float ez,
+	float out_pos[4]
+)
+{
+	const size_t n = level.light_positions.size() / 3;
+	if (n == 0) {
+		out_pos[0] = 0.0f;
+		out_pos[1] = 4.0f;
+		out_pos[2] = 0.0f;
+		out_pos[3] = 0.0f;
+		return;
+	}
+	float best = std::numeric_limits<float>::max();
+	size_t best_i = 0;
+	for (size_t i = 0; i < n; ++i) {
+		const float lx = level.light_positions[i * 3 + 0];
+		const float ly = level.light_positions[i * 3 + 1];
+		const float lz = level.light_positions[i * 3 + 2];
+		const float dx = lx - ex;
+		const float dy = ly - ey;
+		const float dz = lz - ez;
+		const float d2 = dx * dx + dy * dy + dz * dz;
+		if (d2 < best) {
+			best = d2;
+			best_i = i;
+		}
+	}
+	out_pos[0] = level.light_positions[best_i * 3 + 0];
+	out_pos[1] = level.light_positions[best_i * 3 + 1];
+	out_pos[2] = level.light_positions[best_i * 3 + 2];
+	out_pos[3] = 0.0f;
 }
 
 } // namespace
@@ -215,6 +263,32 @@ int main(int argc, char** argv)
 	bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x1a1a2eff, 1.0f, 0);
 	bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 
+	engine::LoadedLevel level;
+	std::string level_err;
+	if (!engine::load_evil_level(
+			ENGINE_MAPS_DIR "/example.evil",
+			ENGINE_MAPS_DIR "/example_lights.evil",
+			level,
+			level_err
+		)) {
+		std::fprintf(stderr, "load_evil_level: %s\n", level_err.c_str());
+		bgfx::shutdown();
+		SDL_DestroyWindow(window);
+		SDL_Quit();
+		return 1;
+	}
+
+	std::vector<LitVertex> floor_vertices;
+	std::vector<LitVertex> wall_vertices;
+	engine::build_level_meshes(level, k_wall_height, floor_vertices, wall_vertices);
+	if (floor_vertices.empty()) {
+		std::fprintf(stderr, "level has no floor tiles\n");
+		bgfx::shutdown();
+		SDL_DestroyWindow(window);
+		SDL_Quit();
+		return 1;
+	}
+
 	bgfx::VertexLayout layout;
 	layout.begin()
 		.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
@@ -223,13 +297,28 @@ int main(int argc, char** argv)
 		.add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
 		.end();
 
-	const bgfx::Memory* platform_vb_mem = bgfx::copy(k_platform_vertices, sizeof(k_platform_vertices));
-	const bgfx::VertexBufferHandle platform_vbh = bgfx::createVertexBuffer(platform_vb_mem, layout);
+	const bgfx::Memory* floor_vb_mem = bgfx::copy(
+		floor_vertices.data(),
+		static_cast<uint32_t>(floor_vertices.size() * sizeof(LitVertex))
+	);
+	const bgfx::VertexBufferHandle floor_vbh = bgfx::createVertexBuffer(floor_vb_mem, layout);
+
+	bgfx::VertexBufferHandle wall_vbh = BGFX_INVALID_HANDLE;
+	if (!wall_vertices.empty()) {
+		const bgfx::Memory* wall_vb_mem = bgfx::copy(
+			wall_vertices.data(),
+			static_cast<uint32_t>(wall_vertices.size() * sizeof(LitVertex))
+		);
+		wall_vbh = bgfx::createVertexBuffer(wall_vb_mem, layout);
+	}
 
 	const bgfx::ProgramHandle program = engine::load_triangle_program();
 	if (!bgfx::isValid(program)) {
 		std::fprintf(stderr, "Shader program creation failed\n");
-		bgfx::destroy(platform_vbh);
+		if (bgfx::isValid(wall_vbh)) {
+			bgfx::destroy(wall_vbh);
+		}
+		bgfx::destroy(floor_vbh);
 		bgfx::shutdown();
 		SDL_DestroyWindow(window);
 		SDL_Quit();
@@ -258,6 +347,11 @@ int main(int argc, char** argv)
 	);
 	const bgfx::TextureHandle floor_bind = bgfx::isValid(floor_tex) ? floor_tex : white_tex;
 
+	const bgfx::TextureHandle wall_tex = engine::load_texture_from_file(
+		ENGINE_TEXTURES_DIR "/plastered_wall_04_diff_2k.jpg"
+	);
+	const bgfx::TextureHandle wall_bind = bgfx::isValid(wall_tex) ? wall_tex : white_tex;
+
 	std::vector<LitVertex> sphere_vertices;
 	std::vector<uint16_t> sphere_indices;
 	build_uv_sphere(sphere_vertices, sphere_indices, k_sphere_radius, 28, 40, k_sphere_color_abgr);
@@ -277,6 +371,23 @@ int main(int argc, char** argv)
 	(void)registry;
 
 	FpsCamera camera;
+	float spawn_x = 0.0f;
+	float spawn_z = 0.0f;
+	if (!first_floor_spawn(level, spawn_x, spawn_z)) {
+		spawn_x = 0.0f;
+		spawn_z = 0.0f;
+	}
+	camera.eyeX = spawn_x;
+	camera.eyeY = engine::PlayerPhysics::k_eye_height + engine::k_platform_surface_y + 0.02f;
+	camera.eyeZ = spawn_z;
+
+	float sphere_cx = 0.0f;
+	float sphere_cz = 0.0f;
+	if (!floor_centroid(level, sphere_cx, sphere_cz)) {
+		sphere_cx = spawn_x;
+		sphere_cz = spawn_z;
+	}
+
 	engine::PlayerPhysics player_physics;
 	bool mouseLook = true;
 	if (SDL_SetRelativeMouseMode(mouseLook ? SDL_TRUE : SDL_FALSE) != 0) {
@@ -319,6 +430,9 @@ int main(int argc, char** argv)
 			fps_camera_apply_mouse(camera, mouseRelX, mouseRelY, 0.0025f);
 		}
 
+		const float prev_eye_x = camera.eyeX;
+		const float prev_eye_z = camera.eyeZ;
+
 		const uint8_t* keys = SDL_GetKeyboardState(nullptr);
 		float dx = 0.0f;
 		float dy = 0.0f;
@@ -328,7 +442,7 @@ int main(int argc, char** argv)
 		camera.eyeY += dy;
 		camera.eyeZ += dz;
 
-		engine::player_physics_step(camera, player_physics, dt);
+		engine::player_physics_step(camera, player_physics, dt, level, prev_eye_x, prev_eye_z);
 
 		const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 		float view[16];
@@ -340,10 +454,11 @@ int main(int argc, char** argv)
 		bgfx::touch(0);
 
 		bgfx::dbgTextClear();
-		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   Point light + gravity",
+		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   .evil level",
 			mouseLook ? "free cursor" : "capture");
 
-		const float light_pos[4] = {2.8f, 5.5f, 1.8f, 0.0f};
+		float light_pos[4];
+		nearest_light(level, camera.eyeX, camera.eyeY, camera.eyeZ, light_pos);
 		const float light_color[4] = {2.4f, 2.1f, 1.7f, 0.0f};
 		const float ambient[4] = {0.07f, 0.08f, 0.11f, 0.0f};
 		bgfx::setUniform(u_light_pos, light_pos);
@@ -358,10 +473,18 @@ int main(int argc, char** argv)
 		bx::mtxIdentity(model);
 		bgfx::setTransform(model);
 		bgfx::setTexture(0, s_albedo, floor_bind);
-		bgfx::setVertexBuffer(0, platform_vbh);
+		bgfx::setVertexBuffer(0, floor_vbh);
 		bgfx::submit(0, program);
 
-		bx::mtxTranslate(model, 0.0f, k_sphere_radius, 0.0f);
+		if (bgfx::isValid(wall_vbh)) {
+			bx::mtxIdentity(model);
+			bgfx::setTransform(model);
+			bgfx::setTexture(0, s_albedo, wall_bind);
+			bgfx::setVertexBuffer(0, wall_vbh);
+			bgfx::submit(0, program);
+		}
+
+		bx::mtxTranslate(model, sphere_cx, k_sphere_radius, sphere_cz);
 		bgfx::setTransform(model);
 		bgfx::setTexture(0, s_albedo, white_tex);
 		bgfx::setVertexBuffer(0, sphere_vbh);
@@ -378,6 +501,9 @@ int main(int argc, char** argv)
 	if (bgfx::isValid(floor_tex)) {
 		bgfx::destroy(floor_tex);
 	}
+	if (bgfx::isValid(wall_tex)) {
+		bgfx::destroy(wall_tex);
+	}
 	bgfx::destroy(white_tex);
 	bgfx::destroy(s_albedo);
 	bgfx::destroy(u_ambient);
@@ -386,7 +512,10 @@ int main(int argc, char** argv)
 	bgfx::destroy(program);
 	bgfx::destroy(sphere_ibh);
 	bgfx::destroy(sphere_vbh);
-	bgfx::destroy(platform_vbh);
+	if (bgfx::isValid(wall_vbh)) {
+		bgfx::destroy(wall_vbh);
+	}
+	bgfx::destroy(floor_vbh);
 	bgfx::shutdown();
 
 	SDL_DestroyWindow(window);

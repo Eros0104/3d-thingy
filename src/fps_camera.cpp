@@ -90,5 +90,5 @@ void fps_camera_view_proj(
 	const bx::Vec3 up = { 0.0f, 1.0f, 0.0f };
 
 	bx::mtxLookAt(outView, eye, at, up);
-	bx::mtxProj(outProj, 70.0f, aspect, 0.1f, 200.0f, homogeneousDepth);
+	bx::mtxProj(outProj, 70.0f, aspect, 0.04f, 200.0f, homogeneousDepth);
 }
