@@ -14,10 +14,12 @@
 
 #include <bx/math.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <limits>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -78,9 +80,10 @@ void window_pixel_size(SDL_Window* window, int* out_w, int* out_h)
 #endif
 }
 
-static constexpr float k_sphere_radius = 1.35f;
-static constexpr uint32_t k_sphere_color_abgr = 0xff8877ddu;
+static constexpr float k_light_bulb_radius = 0.14f;
+static constexpr uint32_t k_light_bulb_abgr = 0xffffffffu;
 static constexpr float k_wall_height = 3.2f;
+static constexpr int k_max_shader_lights = 8;
 
 static void build_uv_sphere(
 	std::vector<LitVertex>& vertices,
@@ -143,68 +146,6 @@ bool first_floor_spawn(const engine::LoadedLevel& level, float& out_x, float& ou
 		}
 	}
 	return false;
-}
-
-bool floor_centroid(const engine::LoadedLevel& level, float& out_x, float& out_z)
-{
-	double sx = 0.0;
-	double sz = 0.0;
-	int n = 0;
-	for (int r = 0; r < level.height; ++r) {
-		for (int c = 0; c < level.width; ++c) {
-			if (level.is_floor(c, r)) {
-				float wx = 0.0f;
-				float wz = 0.0f;
-				level.cell_center_world(c, r, wx, wz);
-				sx += static_cast<double>(wx);
-				sz += static_cast<double>(wz);
-				++n;
-			}
-		}
-	}
-	if (n == 0) {
-		return false;
-	}
-	out_x = static_cast<float>(sx / static_cast<double>(n));
-	out_z = static_cast<float>(sz / static_cast<double>(n));
-	return true;
-}
-
-void nearest_light(
-	const engine::LoadedLevel& level,
-	float ex,
-	float ey,
-	float ez,
-	float out_pos[4]
-)
-{
-	const size_t n = level.light_positions.size() / 3;
-	if (n == 0) {
-		out_pos[0] = 0.0f;
-		out_pos[1] = 4.0f;
-		out_pos[2] = 0.0f;
-		out_pos[3] = 0.0f;
-		return;
-	}
-	float best = std::numeric_limits<float>::max();
-	size_t best_i = 0;
-	for (size_t i = 0; i < n; ++i) {
-		const float lx = level.light_positions[i * 3 + 0];
-		const float ly = level.light_positions[i * 3 + 1];
-		const float lz = level.light_positions[i * 3 + 2];
-		const float dx = lx - ex;
-		const float dy = ly - ey;
-		const float dz = lz - ez;
-		const float d2 = dx * dx + dy * dy + dz * dz;
-		if (d2 < best) {
-			best = d2;
-			best_i = i;
-		}
-	}
-	out_pos[0] = level.light_positions[best_i * 3 + 0];
-	out_pos[1] = level.light_positions[best_i * 3 + 1];
-	out_pos[2] = level.light_positions[best_i * 3 + 2];
-	out_pos[3] = 0.0f;
 }
 
 } // namespace
@@ -325,8 +266,9 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	const bgfx::UniformHandle u_light_pos = bgfx::createUniform("u_lightPos", bgfx::UniformType::Vec4);
-	const bgfx::UniformHandle u_light_color = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4);
+	const bgfx::UniformHandle u_light_pos = bgfx::createUniform("u_lightPos", bgfx::UniformType::Vec4, k_max_shader_lights);
+	const bgfx::UniformHandle u_light_color = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4, k_max_shader_lights);
+	const bgfx::UniformHandle u_light_params = bgfx::createUniform("u_lightParams", bgfx::UniformType::Vec4);
 	const bgfx::UniformHandle u_ambient = bgfx::createUniform("u_ambient", bgfx::UniformType::Vec4);
 	const bgfx::UniformHandle s_albedo = bgfx::createUniform("s_albedo", bgfx::UniformType::Sampler);
 
@@ -352,19 +294,19 @@ int main(int argc, char** argv)
 	);
 	const bgfx::TextureHandle wall_bind = bgfx::isValid(wall_tex) ? wall_tex : white_tex;
 
-	std::vector<LitVertex> sphere_vertices;
-	std::vector<uint16_t> sphere_indices;
-	build_uv_sphere(sphere_vertices, sphere_indices, k_sphere_radius, 28, 40, k_sphere_color_abgr);
-	const bgfx::Memory* sphere_vb_mem = bgfx::copy(
-		sphere_vertices.data(),
-		static_cast<uint32_t>(sphere_vertices.size() * sizeof(LitVertex))
+	std::vector<LitVertex> bulb_vertices;
+	std::vector<uint16_t> bulb_indices;
+	build_uv_sphere(bulb_vertices, bulb_indices, k_light_bulb_radius, 10, 14, k_light_bulb_abgr);
+	const bgfx::Memory* bulb_vb_mem = bgfx::copy(
+		bulb_vertices.data(),
+		static_cast<uint32_t>(bulb_vertices.size() * sizeof(LitVertex))
 	);
-	const bgfx::Memory* sphere_ib_mem = bgfx::copy(
-		sphere_indices.data(),
-		static_cast<uint32_t>(sphere_indices.size() * sizeof(uint16_t))
+	const bgfx::Memory* bulb_ib_mem = bgfx::copy(
+		bulb_indices.data(),
+		static_cast<uint32_t>(bulb_indices.size() * sizeof(uint16_t))
 	);
-	const bgfx::VertexBufferHandle sphere_vbh = bgfx::createVertexBuffer(sphere_vb_mem, layout);
-	const bgfx::IndexBufferHandle sphere_ibh = bgfx::createIndexBuffer(sphere_ib_mem);
+	const bgfx::VertexBufferHandle bulb_vbh = bgfx::createVertexBuffer(bulb_vb_mem, layout);
+	const bgfx::IndexBufferHandle bulb_ibh = bgfx::createIndexBuffer(bulb_ib_mem);
 
 	engine::Registry registry;
 	engine::ecs_bootstrap(registry);
@@ -380,13 +322,6 @@ int main(int argc, char** argv)
 	camera.eyeX = spawn_x;
 	camera.eyeY = engine::PlayerPhysics::k_eye_height + engine::k_platform_surface_y + 0.02f;
 	camera.eyeZ = spawn_z;
-
-	float sphere_cx = 0.0f;
-	float sphere_cz = 0.0f;
-	if (!floor_centroid(level, sphere_cx, sphere_cz)) {
-		sphere_cx = spawn_x;
-		sphere_cz = spawn_z;
-	}
 
 	engine::PlayerPhysics player_physics;
 	bool mouseLook = true;
@@ -457,12 +392,34 @@ int main(int argc, char** argv)
 		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   .evil level",
 			mouseLook ? "free cursor" : "capture");
 
-		float light_pos[4];
-		nearest_light(level, camera.eyeX, camera.eyeY, camera.eyeZ, light_pos);
-		const float light_color[4] = {2.4f, 2.1f, 1.7f, 0.0f};
+		std::array<float, static_cast<size_t>(k_max_shader_lights) * 4> light_pos_pack{};
+		std::array<float, static_cast<size_t>(k_max_shader_lights) * 4> light_color_pack{};
+		const float default_light_color[4] = {2.4f, 2.1f, 1.7f, 0.0f};
+
+		size_t n_lights = level.light_positions.size() / 3;
+		if (n_lights == 0) {
+			light_pos_pack[0] = 0.0f;
+			light_pos_pack[1] = 4.0f;
+			light_pos_pack[2] = 0.0f;
+			light_pos_pack[3] = 0.0f;
+			std::memcpy(light_color_pack.data(), default_light_color, sizeof(default_light_color));
+			n_lights = 1;
+		} else {
+			n_lights = std::min(n_lights, static_cast<size_t>(k_max_shader_lights));
+			for (size_t i = 0; i < n_lights; ++i) {
+				light_pos_pack[i * 4 + 0] = level.light_positions[i * 3 + 0];
+				light_pos_pack[i * 4 + 1] = level.light_positions[i * 3 + 1];
+				light_pos_pack[i * 4 + 2] = level.light_positions[i * 3 + 2];
+				light_pos_pack[i * 4 + 3] = 0.0f;
+				std::memcpy(light_color_pack.data() + i * 4, default_light_color, sizeof(default_light_color));
+			}
+		}
+
+		const float light_params[4] = {static_cast<float>(n_lights), 0.0f, 0.0f, 0.0f};
 		const float ambient[4] = {0.07f, 0.08f, 0.11f, 0.0f};
-		bgfx::setUniform(u_light_pos, light_pos);
-		bgfx::setUniform(u_light_color, light_color);
+		bgfx::setUniform(u_light_pos, light_pos_pack.data(), k_max_shader_lights);
+		bgfx::setUniform(u_light_color, light_color_pack.data(), k_max_shader_lights);
+		bgfx::setUniform(u_light_params, light_params);
 		bgfx::setUniform(u_ambient, ambient);
 
 		float model[16];
@@ -484,12 +441,26 @@ int main(int argc, char** argv)
 			bgfx::submit(0, program);
 		}
 
-		bx::mtxTranslate(model, sphere_cx, k_sphere_radius, sphere_cz);
-		bgfx::setTransform(model);
-		bgfx::setTexture(0, s_albedo, white_tex);
-		bgfx::setVertexBuffer(0, sphere_vbh);
-		bgfx::setIndexBuffer(sphere_ibh);
-		bgfx::submit(0, program);
+		auto draw_bulb = [&](float lx, float ly, float lz) {
+			bx::mtxTranslate(model, lx, ly, lz);
+			bgfx::setTransform(model);
+			bgfx::setTexture(0, s_albedo, white_tex);
+			bgfx::setVertexBuffer(0, bulb_vbh);
+			bgfx::setIndexBuffer(bulb_ibh);
+			bgfx::submit(0, program);
+		};
+		const size_t bulb_count = level.light_positions.size() / 3;
+		if (bulb_count == 0) {
+			draw_bulb(0.0f, 4.0f, 0.0f);
+		} else {
+			for (size_t li = 0; li < bulb_count; ++li) {
+				draw_bulb(
+					level.light_positions[li * 3 + 0],
+					level.light_positions[li * 3 + 1],
+					level.light_positions[li * 3 + 2]
+				);
+			}
+		}
 
 		bgfx::frame();
 	}
@@ -507,11 +478,12 @@ int main(int argc, char** argv)
 	bgfx::destroy(white_tex);
 	bgfx::destroy(s_albedo);
 	bgfx::destroy(u_ambient);
+	bgfx::destroy(u_light_params);
 	bgfx::destroy(u_light_color);
 	bgfx::destroy(u_light_pos);
 	bgfx::destroy(program);
-	bgfx::destroy(sphere_ibh);
-	bgfx::destroy(sphere_vbh);
+	bgfx::destroy(bulb_ibh);
+	bgfx::destroy(bulb_vbh);
 	if (bgfx::isValid(wall_vbh)) {
 		bgfx::destroy(wall_vbh);
 	}
