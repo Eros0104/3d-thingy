@@ -81,9 +81,14 @@ add_executable(fps_engine
   src/fps_camera.cpp
   src/physics_world.cpp
   src/shader_program.cpp
+  src/texture_loader.cpp
   src/ecs.cpp
   shaders/vs_triangle.sc
   shaders/fs_triangle.sc
+)
+
+target_compile_definitions(fps_engine PRIVATE
+  "ENGINE_TEXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/textures\""
 )
 
 target_include_directories(fps_engine PRIVATE
