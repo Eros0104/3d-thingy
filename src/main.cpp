@@ -2,6 +2,7 @@
 #include "fps_camera.hpp"
 #include "physics_world.hpp"
 #include "shader_program.hpp"
+#include "texture_loader.hpp"
 
 #include <SDL.h>
 #include <SDL_syswm.h>
@@ -15,6 +16,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+
+#ifndef ENGINE_TEXTURES_DIR
+#define ENGINE_TEXTURES_DIR "textures"
+#endif
 
 namespace {
 
@@ -72,24 +77,33 @@ struct LitVertex {
 	float nx = 0.0f;
 	float ny = 1.0f;
 	float nz = 0.0f;
+	float u = 0.0f;
+	float v = 0.0f;
 	uint32_t abgr = 0xffffffff;
 };
 
-static LitVertex k_triangle_vertices[] = {
-	{0.0f, 1.35f, 0.0f, 0.0f, 0.0f, 1.0f, 0xff3355ffu},
-	{-0.55f, 0.2f, 0.0f, 0.0f, 0.0f, 1.0f, 0xff99ff55u},
-	{0.55f, 0.2f, 0.0f, 0.0f, 0.0f, 1.0f, 0xff44ccffu},
-};
-
-static constexpr uint32_t k_platform_color_abgr = 0xff6a5c48u;
+static constexpr uint32_t k_platform_color_abgr = 0xffffffffu;
+static constexpr float k_floor_uv_per_world = 1.0f / 6.0f;
 
 static LitVertex k_platform_vertices[] = {
-	{-engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, k_platform_color_abgr},
-	{ engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, k_platform_color_abgr},
-	{ engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, k_platform_color_abgr},
-	{-engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, k_platform_color_abgr},
-	{-engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, k_platform_color_abgr},
-	{ engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, k_platform_color_abgr},
+	{-engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, k_platform_color_abgr},
+	{ engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
+		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
+		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
+		k_platform_color_abgr},
+	{ engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
+		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
+		0.0f,
+		k_platform_color_abgr},
+	{-engine::k_platform_half_extent, engine::k_platform_surface_y, -engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, k_platform_color_abgr},
+	{-engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
+		0.0f,
+		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
+		k_platform_color_abgr},
+	{ engine::k_platform_half_extent, engine::k_platform_surface_y,  engine::k_platform_half_extent, 0.0f, 1.0f, 0.0f,
+		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
+		(engine::k_platform_half_extent * 2.0f) * k_floor_uv_per_world,
+		k_platform_color_abgr},
 };
 
 static constexpr float k_sphere_radius = 1.35f;
@@ -122,6 +136,8 @@ static void build_uv_sphere(
 			v.nx = cos_phi * cos_theta;
 			v.ny = sin_phi;
 			v.nz = cos_phi * sin_theta;
+			v.u = static_cast<float>(j) / static_cast<float>(slices);
+			v.v = static_cast<float>(i) / static_cast<float>(stacks);
 			v.abgr = abgr;
 			vertices.push_back(v);
 		}
@@ -203,11 +219,9 @@ int main(int argc, char** argv)
 	layout.begin()
 		.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
 		.add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
+		.add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
 		.add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
 		.end();
-
-	const bgfx::Memory* vb_mem = bgfx::copy(k_triangle_vertices, sizeof(k_triangle_vertices));
-	const bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(vb_mem, layout);
 
 	const bgfx::Memory* platform_vb_mem = bgfx::copy(k_platform_vertices, sizeof(k_platform_vertices));
 	const bgfx::VertexBufferHandle platform_vbh = bgfx::createVertexBuffer(platform_vb_mem, layout);
@@ -216,7 +230,6 @@ int main(int argc, char** argv)
 	if (!bgfx::isValid(program)) {
 		std::fprintf(stderr, "Shader program creation failed\n");
 		bgfx::destroy(platform_vbh);
-		bgfx::destroy(vbh);
 		bgfx::shutdown();
 		SDL_DestroyWindow(window);
 		SDL_Quit();
@@ -226,6 +239,24 @@ int main(int argc, char** argv)
 	const bgfx::UniformHandle u_light_pos = bgfx::createUniform("u_lightPos", bgfx::UniformType::Vec4);
 	const bgfx::UniformHandle u_light_color = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4);
 	const bgfx::UniformHandle u_ambient = bgfx::createUniform("u_ambient", bgfx::UniformType::Vec4);
+	const bgfx::UniformHandle s_albedo = bgfx::createUniform("s_albedo", bgfx::UniformType::Sampler);
+
+	static const uint32_t k_white_rgba = 0xffffffffu;
+	const bgfx::Memory* white_mem = bgfx::copy(&k_white_rgba, sizeof(k_white_rgba));
+	const bgfx::TextureHandle white_tex = bgfx::createTexture2D(
+		1,
+		1,
+		false,
+		1,
+		bgfx::TextureFormat::RGBA8,
+		0,
+		white_mem
+	);
+
+	const bgfx::TextureHandle floor_tex = engine::load_texture_from_file(
+		ENGINE_TEXTURES_DIR "/checkered_pavement_tiles_diff_2k.jpg"
+	);
+	const bgfx::TextureHandle floor_bind = bgfx::isValid(floor_tex) ? floor_tex : white_tex;
 
 	std::vector<LitVertex> sphere_vertices;
 	std::vector<uint16_t> sphere_indices;
@@ -326,16 +357,13 @@ int main(int argc, char** argv)
 		bgfx::setState(renderState);
 		bx::mtxIdentity(model);
 		bgfx::setTransform(model);
+		bgfx::setTexture(0, s_albedo, floor_bind);
 		bgfx::setVertexBuffer(0, platform_vbh);
-		bgfx::submit(0, program);
-
-		bx::mtxIdentity(model);
-		bgfx::setTransform(model);
-		bgfx::setVertexBuffer(0, vbh);
 		bgfx::submit(0, program);
 
 		bx::mtxTranslate(model, 0.0f, k_sphere_radius, 0.0f);
 		bgfx::setTransform(model);
+		bgfx::setTexture(0, s_albedo, white_tex);
 		bgfx::setVertexBuffer(0, sphere_vbh);
 		bgfx::setIndexBuffer(sphere_ibh);
 		bgfx::submit(0, program);
@@ -347,6 +375,11 @@ int main(int argc, char** argv)
 		SDL_SetRelativeMouseMode(SDL_FALSE);
 	}
 
+	if (bgfx::isValid(floor_tex)) {
+		bgfx::destroy(floor_tex);
+	}
+	bgfx::destroy(white_tex);
+	bgfx::destroy(s_albedo);
 	bgfx::destroy(u_ambient);
 	bgfx::destroy(u_light_color);
 	bgfx::destroy(u_light_pos);
@@ -354,7 +387,6 @@ int main(int argc, char** argv)
 	bgfx::destroy(sphere_ibh);
 	bgfx::destroy(sphere_vbh);
 	bgfx::destroy(platform_vbh);
-	bgfx::destroy(vbh);
 	bgfx::shutdown();
 
 	SDL_DestroyWindow(window);
