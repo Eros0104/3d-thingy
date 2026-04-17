@@ -74,13 +74,25 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT)
 
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install OFF CACHE INTERNAL "")
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 set(SHADER_GEN_DIR "${CMAKE_BINARY_DIR}/generated/shaders")
 
 add_executable(fps_engine
   src/main.cpp
   src/fps_camera.cpp
   src/physics_world.cpp
-  src/level_loader.cpp
+  src/level_data.cpp
+  src/json_level.cpp
+  src/level_mesh.cpp
+  src/level_binary.cpp
   src/shader_program.cpp
   src/texture_loader.cpp
   src/ecs.cpp
@@ -106,6 +118,22 @@ target_link_libraries(fps_engine PRIVATE
   bimg
   bimg_decode
   EnTT::EnTT
+  nlohmann_json::nlohmann_json
+)
+
+add_executable(level_pack
+  src/tools/level_pack.cpp
+  src/level_data.cpp
+  src/json_level.cpp
+  src/level_binary.cpp
+)
+
+target_include_directories(level_pack PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(level_pack PRIVATE
+  nlohmann_json::nlohmann_json
 )
 
 if(APPLE)

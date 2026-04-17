@@ -1,63 +1,243 @@
 #include "physics_world.hpp"
 
 #include "fps_camera.hpp"
-#include "level_loader.hpp"
-
-#include <bx/math.h>
+#include "level_data.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace engine {
 
 namespace {
 
-bool sample_in_wall(const LoadedLevel& level, float wx, float wz)
+constexpr float k_no_surface = -std::numeric_limits<float>::infinity();
+
+struct SegProj {
+	float t;           ///< Parameter along segment (0 at a, 1 at b), unclamped.
+	float t_clamped;   ///< Clamped to [0, 1].
+	float dist;        ///< Distance from point to closest-on-segment (clamped).
+	float cx;          ///< Closest point X (clamped).
+	float cz;          ///< Closest point Z (clamped).
+};
+
+SegProj project_to_segment(Vec2 a, Vec2 b, float px, float pz)
 {
-	int c = 0;
-	int r = 0;
-	level.world_to_cell(wx, wz, c, r);
-	return level.in_bounds(c, r) && level.is_wall(c, r);
+	SegProj r;
+	const float dx = b.x - a.x;
+	const float dz = b.z - a.z;
+	const float len_sq = dx * dx + dz * dz;
+	if (len_sq <= 1e-8f) {
+		r.t = 0.0f;
+		r.t_clamped = 0.0f;
+		r.cx = a.x;
+		r.cz = a.z;
+	} else {
+		r.t = ((px - a.x) * dx + (pz - a.z) * dz) / len_sq;
+		r.t_clamped = r.t < 0.0f ? 0.0f : (r.t > 1.0f ? 1.0f : r.t);
+		r.cx = a.x + dx * r.t_clamped;
+		r.cz = a.z + dz * r.t_clamped;
+	}
+	const float ex = px - r.cx;
+	const float ez = pz - r.cz;
+	r.dist = std::sqrt(ex * ex + ez * ez);
+	return r;
 }
 
-bool body_hits_wall_xy(const LoadedLevel& level, float eye_x, float eye_z, float radius)
+/// True if a Door wall lets the player pass through at the closest point. We check only the
+/// horizontal door opening window along the segment; vertical fit is assumed (door_height is
+/// always >= player eye height in typical mansions).
+bool wall_is_passable(const Wall& w, const SegProj& proj, float feet_y)
 {
-	if (sample_in_wall(level, eye_x, eye_z)) {
+	if (w.type != WallType::Door) {
+		return false;
+	}
+	const float dx = w.b.x - w.a.x;
+	const float dz = w.b.z - w.a.z;
+	const float len = std::sqrt(dx * dx + dz * dz);
+	if (len <= 1e-6f) {
+		return false;
+	}
+	const float door_top = w.y0 + w.door_height;
+	if (feet_y < w.y0 - 0.1f || feet_y + PlayerPhysics::k_eye_height > door_top + 0.2f) {
+		// Feet below bottom of door or head above top of door: blocked.
+		return false;
+	}
+	float door_off = w.door_offset;
+	float door_w = w.door_width;
+	if (door_w > len) door_w = len;
+	if (door_off < 0.0f) door_off = 0.5f * (len - door_w);
+	if (door_off < 0.0f) door_off = 0.0f;
+	if (door_off + door_w > len) door_off = len - door_w;
+	const float t0 = door_off / len;
+	const float t1 = (door_off + door_w) / len;
+	return proj.t_clamped > t0 && proj.t_clamped < t1;
+}
+
+/// True if the wall's vertical span overlaps the player's body (feet to eye). Walls whose span
+/// is entirely above the player's head or below the player's feet don't collide horizontally.
+bool wall_spans_body(const Wall& w, float feet_y)
+{
+	const float head_y = feet_y + PlayerPhysics::k_eye_height;
+	return w.y1 > feet_y && w.y0 < head_y;
+}
+
+/// Walkable surface Y at (wx, wz) if the point is over a stair rectangle. Returns k_no_surface
+/// otherwise. Y matches the discrete step tops emitted by the mesh builder (so feet snap onto
+/// each step rather than sliding on a smooth ramp that would clip into the rendered stairs).
+float stair_surface_y_at(const Stair& s, float wx, float wz)
+{
+	const float dx = s.center_b.x - s.center_a.x;
+	const float dz = s.center_b.z - s.center_a.z;
+	const float len_sq = dx * dx + dz * dz;
+	if (len_sq <= 1e-8f) {
+		return k_no_surface;
+	}
+	const float t = ((wx - s.center_a.x) * dx + (wz - s.center_a.z) * dz) / len_sq;
+	if (t < 0.0f || t > 1.0f) {
+		return k_no_surface;
+	}
+	const float cx = s.center_a.x + dx * t;
+	const float cz = s.center_a.z + dz * t;
+	const float ex = wx - cx;
+	const float ez = wz - cz;
+	const float perp_dist = std::sqrt(ex * ex + ez * ez);
+	if (perp_dist > 0.5f * s.width) {
+		return k_no_surface;
+	}
+	const int steps = s.steps < 1 ? 1 : s.steps;
+	int step_idx = static_cast<int>(t * static_cast<float>(steps));
+	if (step_idx >= steps) step_idx = steps - 1;
+	const float top_t = static_cast<float>(step_idx + 1) / static_cast<float>(steps);
+	return s.from_y + (s.to_y - s.from_y) * top_t;
+}
+
+/// The highest walkable surface at (wx, wz) whose top is <= max_y. Returns k_no_surface if none.
+float highest_walkable_surface(const Level& level, float wx, float wz, float max_y)
+{
+	float best = k_no_surface;
+	const Vec2 p{wx, wz};
+	for (const Sector& s : level.sectors) {
+		if (!point_in_polygon(s.polygon, p)) {
+			continue;
+		}
+		if (s.floor_y <= max_y && s.floor_y > best) {
+			best = s.floor_y;
+		}
+	}
+	for (const Stair& s : level.stairs) {
+		const float y = stair_surface_y_at(s, wx, wz);
+		if (y == k_no_surface) {
+			continue;
+		}
+		if (y <= max_y && y > best) {
+			best = y;
+		}
+	}
+	return best;
+}
+
+bool body_hits_any_wall(
+	const Level& level,
+	float px, float pz,
+	float feet_y,
+	float radius)
+{
+	for (const Wall& w : level.walls) {
+		if (!wall_spans_body(w, feet_y)) {
+			continue;
+		}
+		const SegProj proj = project_to_segment(w.a, w.b, px, pz);
+		if (proj.dist >= radius) {
+			continue;
+		}
+		if (wall_is_passable(w, proj, feet_y)) {
+			continue;
+		}
 		return true;
 	}
-	static constexpr int k_samples = 8;
-	for (int i = 0; i < k_samples; ++i) {
-		const float a = (bx::kPi * 2.0f * static_cast<float>(i)) / static_cast<float>(k_samples);
-		const float sx = eye_x + std::cos(a) * radius;
-		const float sz = eye_z + std::sin(a) * radius;
-		if (sample_in_wall(level, sx, sz)) {
+	return false;
+}
+
+/// True if the cell that (wx, wz) lies in would be an unreachable ledge — a sector whose
+/// floor_y is more than step_up above feet_y, or a stair step similarly too tall.
+bool cliff_blocks_climb(const Level& level, float wx, float wz, float feet_y, float step_up)
+{
+	const Vec2 p{wx, wz};
+	float highest_floor = k_no_surface;
+	bool any_sector = false;
+	for (const Sector& s : level.sectors) {
+		if (!point_in_polygon(s.polygon, p)) {
+			continue;
+		}
+		any_sector = true;
+		if (s.floor_y > highest_floor) {
+			highest_floor = s.floor_y;
+		}
+	}
+	if (any_sector) {
+		// Is there a reachable sector here? One whose floor_y <= feet_y + step_up.
+		bool reachable = false;
+		for (const Sector& s : level.sectors) {
+			if (!point_in_polygon(s.polygon, p)) {
+				continue;
+			}
+			if (s.floor_y <= feet_y + step_up) {
+				reachable = true;
+				break;
+			}
+		}
+		if (!reachable) {
+			return true;
+		}
+	}
+	for (const Stair& s : level.stairs) {
+		const float y = stair_surface_y_at(s, wx, wz);
+		if (y == k_no_surface) {
+			continue;
+		}
+		if (y > feet_y + step_up) {
 			return true;
 		}
 	}
 	return false;
 }
 
-void resolve_horizontal_wall_slide(
-	const LoadedLevel& level,
-	float prev_x,
-	float prev_z,
-	float cand_x,
-	float cand_z,
+bool body_hits_wall_or_cliff(
+	const Level& level,
+	float px, float pz,
+	float feet_y,
 	float radius,
-	float& out_x,
-	float& out_z
-)
+	float step_up)
 {
-	if (!body_hits_wall_xy(level, cand_x, cand_z, radius)) {
+	if (body_hits_any_wall(level, px, pz, feet_y, radius)) {
+		return true;
+	}
+	if (cliff_blocks_climb(level, px, pz, feet_y, step_up)) {
+		return true;
+	}
+	return false;
+}
+
+void resolve_horizontal_slide(
+	const Level& level,
+	float prev_x, float prev_z,
+	float cand_x, float cand_z,
+	float feet_y,
+	float radius,
+	float step_up,
+	float& out_x, float& out_z)
+{
+	if (!body_hits_wall_or_cliff(level, cand_x, cand_z, feet_y, radius, step_up)) {
 		out_x = cand_x;
 		out_z = cand_z;
 		return;
 	}
-	if (!body_hits_wall_xy(level, cand_x, prev_z, radius)) {
+	if (!body_hits_wall_or_cliff(level, cand_x, prev_z, feet_y, radius, step_up)) {
 		out_x = cand_x;
 		out_z = prev_z;
 		return;
 	}
-	if (!body_hits_wall_xy(level, prev_x, cand_z, radius)) {
+	if (!body_hits_wall_or_cliff(level, prev_x, cand_z, feet_y, radius, step_up)) {
 		out_x = prev_x;
 		out_z = cand_z;
 		return;
@@ -72,35 +252,38 @@ void player_physics_step(
 	FpsCamera& camera,
 	PlayerPhysics& physics,
 	float dt,
-	const LoadedLevel& level,
+	const Level& level,
 	float prev_eye_x,
-	float prev_eye_z
-)
+	float prev_eye_z)
 {
 	physics.velocity_y -= PlayerPhysics::k_gravity * dt;
 	camera.eyeY += physics.velocity_y * dt;
 
-	// Wall slide: full WASD delta can overlap wall samples while sliding along it; try X-only / Z-only.
+	const float feet_y = camera.eyeY - PlayerPhysics::k_eye_height;
+
 	const float move_dx = camera.eyeX - prev_eye_x;
 	const float move_dz = camera.eyeZ - prev_eye_z;
 	const float cand_x = prev_eye_x + move_dx;
 	const float cand_z = prev_eye_z + move_dz;
-	resolve_horizontal_wall_slide(
+	resolve_horizontal_slide(
 		level,
-		prev_eye_x,
-		prev_eye_z,
-		cand_x,
-		cand_z,
+		prev_eye_x, prev_eye_z,
+		cand_x, cand_z,
+		feet_y,
 		PlayerPhysics::k_body_radius_xz,
-		camera.eyeX,
-		camera.eyeZ
+		PlayerPhysics::k_step_up,
+		camera.eyeX, camera.eyeZ
 	);
 
-	const float feet_y = camera.eyeY - PlayerPhysics::k_eye_height;
-	const bool on_floor_cell = level.walkable_at_world(camera.eyeX, camera.eyeZ);
+	const float new_feet_y = camera.eyeY - PlayerPhysics::k_eye_height;
+	const float surface = highest_walkable_surface(
+		level,
+		camera.eyeX, camera.eyeZ,
+		new_feet_y + PlayerPhysics::k_step_up
+	);
 
-	if (feet_y <= k_platform_surface_y && on_floor_cell && physics.velocity_y <= 0.0f) {
-		camera.eyeY = k_platform_surface_y + PlayerPhysics::k_eye_height;
+	if (surface != k_no_surface && new_feet_y <= surface && physics.velocity_y <= 0.0f) {
+		camera.eyeY = surface + PlayerPhysics::k_eye_height;
 		physics.velocity_y = 0.0f;
 	}
 }

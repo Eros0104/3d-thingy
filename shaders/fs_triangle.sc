@@ -26,7 +26,8 @@ void main()
 		vec3 toLight = u_lightPos[i].xyz - v_worldPos;
 		float distSq = dot(toLight, toLight);
 		vec3 L = normalize(toLight);
-		float ndl = max(dot(N, L), 0.0);
+		// Two-sided lighting: walls are zero-thickness so we light whichever face is nearer.
+		float ndl = abs(dot(N, L));
 		float atten = 1.0 / (1.0 + 0.15 * distSq);
 		diffuseAccum += ndl * u_lightColor[i].xyz * albedo * atten;
 	}

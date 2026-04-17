@@ -1,6 +1,9 @@
 #include "ecs.hpp"
 #include "fps_camera.hpp"
-#include "level_loader.hpp"
+#include "json_level.hpp"
+#include "level_binary.hpp"
+#include "level_data.hpp"
+#include "level_mesh.hpp"
 #include "lit_vertex.hpp"
 #include "physics_world.hpp"
 #include "shader_program.hpp"
@@ -82,7 +85,6 @@ void window_pixel_size(SDL_Window* window, int* out_w, int* out_h)
 
 static constexpr float k_light_bulb_radius = 0.14f;
 static constexpr uint32_t k_light_bulb_abgr = 0xffffffffu;
-static constexpr float k_wall_height = 3.2f;
 static constexpr int k_max_shader_lights = 8;
 
 static void build_uv_sphere(
@@ -135,25 +137,32 @@ static void build_uv_sphere(
 	}
 }
 
-bool first_floor_spawn(const engine::LoadedLevel& level, float& out_x, float& out_z)
+bool load_level_any(const char* path, engine::Level& out, std::string& err)
 {
-	for (int r = 0; r < level.height; ++r) {
-		for (int c = 0; c < level.width; ++c) {
-			if (level.is_floor(c, r)) {
-				level.cell_center_world(c, r, out_x, out_z);
-				return true;
-			}
-		}
+	const std::string p = path;
+	if (p.size() >= 5 && p.compare(p.size() - 5, 5, ".evil") == 0) {
+		return engine::load_level_binary(path, out, err);
 	}
-	return false;
+	return engine::load_json_level(path, out, err);
+}
+
+bgfx::VertexBufferHandle create_vertex_buffer(const std::vector<LitVertex>& verts, const bgfx::VertexLayout& layout)
+{
+	if (verts.empty()) {
+		return BGFX_INVALID_HANDLE;
+	}
+	const bgfx::Memory* mem = bgfx::copy(verts.data(), static_cast<uint32_t>(verts.size() * sizeof(LitVertex)));
+	return bgfx::createVertexBuffer(mem, layout);
 }
 
 } // namespace
 
 int main(int argc, char** argv)
 {
-	(void)argc;
-	(void)argv;
+	const char* level_path = ENGINE_MAPS_DIR "/mansion.json";
+	if (argc >= 2) {
+		level_path = argv[1];
+	}
 
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) != 0) {
 		std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -204,26 +213,20 @@ int main(int argc, char** argv)
 	bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x1a1a2eff, 1.0f, 0);
 	bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 
-	engine::LoadedLevel level;
+	engine::Level level;
 	std::string level_err;
-	if (!engine::load_evil_level(
-			ENGINE_MAPS_DIR "/example.evil",
-			ENGINE_MAPS_DIR "/example_lights.evil",
-			level,
-			level_err
-		)) {
-		std::fprintf(stderr, "load_evil_level: %s\n", level_err.c_str());
+	if (!load_level_any(level_path, level, level_err)) {
+		std::fprintf(stderr, "load_level: %s\n", level_err.c_str());
 		bgfx::shutdown();
 		SDL_DestroyWindow(window);
 		SDL_Quit();
 		return 1;
 	}
 
-	std::vector<LitVertex> floor_vertices;
-	std::vector<LitVertex> wall_vertices;
-	engine::build_level_meshes(level, k_wall_height, floor_vertices, wall_vertices);
-	if (floor_vertices.empty()) {
-		std::fprintf(stderr, "level has no floor tiles\n");
+	engine::LevelMeshOutput meshes;
+	engine::build_level_meshes(level, meshes);
+	if (meshes.floor_vertices.empty()) {
+		std::fprintf(stderr, "level has no floor geometry (sectors empty?)\n");
 		bgfx::shutdown();
 		SDL_DestroyWindow(window);
 		SDL_Quit();
@@ -238,28 +241,16 @@ int main(int argc, char** argv)
 		.add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
 		.end();
 
-	const bgfx::Memory* floor_vb_mem = bgfx::copy(
-		floor_vertices.data(),
-		static_cast<uint32_t>(floor_vertices.size() * sizeof(LitVertex))
-	);
-	const bgfx::VertexBufferHandle floor_vbh = bgfx::createVertexBuffer(floor_vb_mem, layout);
-
-	bgfx::VertexBufferHandle wall_vbh = BGFX_INVALID_HANDLE;
-	if (!wall_vertices.empty()) {
-		const bgfx::Memory* wall_vb_mem = bgfx::copy(
-			wall_vertices.data(),
-			static_cast<uint32_t>(wall_vertices.size() * sizeof(LitVertex))
-		);
-		wall_vbh = bgfx::createVertexBuffer(wall_vb_mem, layout);
-	}
+	const bgfx::VertexBufferHandle floor_vbh = create_vertex_buffer(meshes.floor_vertices, layout);
+	const bgfx::VertexBufferHandle wall_vbh = create_vertex_buffer(meshes.wall_vertices, layout);
+	const bgfx::VertexBufferHandle stair_vbh = create_vertex_buffer(meshes.stair_vertices, layout);
 
 	const bgfx::ProgramHandle program = engine::load_triangle_program();
 	if (!bgfx::isValid(program)) {
 		std::fprintf(stderr, "Shader program creation failed\n");
-		if (bgfx::isValid(wall_vbh)) {
-			bgfx::destroy(wall_vbh);
-		}
-		bgfx::destroy(floor_vbh);
+		if (bgfx::isValid(stair_vbh)) bgfx::destroy(stair_vbh);
+		if (bgfx::isValid(wall_vbh)) bgfx::destroy(wall_vbh);
+		if (bgfx::isValid(floor_vbh)) bgfx::destroy(floor_vbh);
 		bgfx::shutdown();
 		SDL_DestroyWindow(window);
 		SDL_Quit();
@@ -313,15 +304,10 @@ int main(int argc, char** argv)
 	(void)registry;
 
 	FpsCamera camera;
-	float spawn_x = 0.0f;
-	float spawn_z = 0.0f;
-	if (!first_floor_spawn(level, spawn_x, spawn_z)) {
-		spawn_x = 0.0f;
-		spawn_z = 0.0f;
-	}
-	camera.eyeX = spawn_x;
-	camera.eyeY = engine::PlayerPhysics::k_eye_height + engine::k_platform_surface_y + 0.02f;
-	camera.eyeZ = spawn_z;
+	camera.eyeX = level.spawn.pos.x;
+	camera.eyeY = level.spawn.pos.y + engine::PlayerPhysics::k_eye_height + 0.02f;
+	camera.eyeZ = level.spawn.pos.z;
+	camera.yaw = level.spawn.yaw_deg * (bx::kPi / 180.0f);
 
 	engine::PlayerPhysics player_physics;
 	bool mouseLook = true;
@@ -389,34 +375,42 @@ int main(int argc, char** argv)
 		bgfx::touch(0);
 
 		bgfx::dbgTextClear();
-		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   .evil level",
-			mouseLook ? "free cursor" : "capture");
+		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   level=%s  sectors=%zu walls=%zu stairs=%zu",
+			mouseLook ? "free cursor" : "capture",
+			level.name.empty() ? "(unnamed)" : level.name.c_str(),
+			level.sectors.size(), level.walls.size(), level.stairs.size());
 
 		std::array<float, static_cast<size_t>(k_max_shader_lights) * 4> light_pos_pack{};
 		std::array<float, static_cast<size_t>(k_max_shader_lights) * 4> light_color_pack{};
-		const float default_light_color[4] = {2.4f, 2.1f, 1.7f, 0.0f};
 
-		size_t n_lights = level.light_positions.size() / 3;
+		size_t n_lights = level.lights.size();
 		if (n_lights == 0) {
 			light_pos_pack[0] = 0.0f;
 			light_pos_pack[1] = 4.0f;
 			light_pos_pack[2] = 0.0f;
 			light_pos_pack[3] = 0.0f;
-			std::memcpy(light_color_pack.data(), default_light_color, sizeof(default_light_color));
+			light_color_pack[0] = 2.4f;
+			light_color_pack[1] = 2.1f;
+			light_color_pack[2] = 1.7f;
+			light_color_pack[3] = 0.0f;
 			n_lights = 1;
 		} else {
 			n_lights = std::min(n_lights, static_cast<size_t>(k_max_shader_lights));
 			for (size_t i = 0; i < n_lights; ++i) {
-				light_pos_pack[i * 4 + 0] = level.light_positions[i * 3 + 0];
-				light_pos_pack[i * 4 + 1] = level.light_positions[i * 3 + 1];
-				light_pos_pack[i * 4 + 2] = level.light_positions[i * 3 + 2];
+				const engine::Light& L = level.lights[i];
+				light_pos_pack[i * 4 + 0] = L.pos.x;
+				light_pos_pack[i * 4 + 1] = L.pos.y;
+				light_pos_pack[i * 4 + 2] = L.pos.z;
 				light_pos_pack[i * 4 + 3] = 0.0f;
-				std::memcpy(light_color_pack.data() + i * 4, default_light_color, sizeof(default_light_color));
+				light_color_pack[i * 4 + 0] = L.color[0] * L.intensity;
+				light_color_pack[i * 4 + 1] = L.color[1] * L.intensity;
+				light_color_pack[i * 4 + 2] = L.color[2] * L.intensity;
+				light_color_pack[i * 4 + 3] = 0.0f;
 			}
 		}
 
 		const float light_params[4] = {static_cast<float>(n_lights), 0.0f, 0.0f, 0.0f};
-		const float ambient[4] = {0.07f, 0.08f, 0.11f, 0.0f};
+		const float ambient[4] = {level.ambient[0], level.ambient[1], level.ambient[2], 0.0f};
 		bgfx::setUniform(u_light_pos, light_pos_pack.data(), k_max_shader_lights);
 		bgfx::setUniform(u_light_color, light_color_pack.data(), k_max_shader_lights);
 		bgfx::setUniform(u_light_params, light_params);
@@ -426,22 +420,23 @@ int main(int argc, char** argv)
 		const uint64_t renderState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z
 			| BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_MSAA;
 
-		bgfx::setState(renderState);
-		bx::mtxIdentity(model);
-		bgfx::setTransform(model);
-		bgfx::setTexture(0, s_albedo, floor_bind);
-		bgfx::setVertexBuffer(0, floor_vbh);
-		bgfx::submit(0, program);
-
-		if (bgfx::isValid(wall_vbh)) {
+		auto submit_pass = [&](bgfx::VertexBufferHandle vbh, bgfx::TextureHandle tex) {
+			if (!bgfx::isValid(vbh)) {
+				return;
+			}
+			bgfx::setState(renderState);
 			bx::mtxIdentity(model);
 			bgfx::setTransform(model);
-			bgfx::setTexture(0, s_albedo, wall_bind);
-			bgfx::setVertexBuffer(0, wall_vbh);
+			bgfx::setTexture(0, s_albedo, tex);
+			bgfx::setVertexBuffer(0, vbh);
 			bgfx::submit(0, program);
-		}
+		};
+		submit_pass(floor_vbh, floor_bind);
+		submit_pass(wall_vbh, wall_bind);
+		submit_pass(stair_vbh, wall_bind);
 
 		auto draw_bulb = [&](float lx, float ly, float lz) {
+			bgfx::setState(renderState);
 			bx::mtxTranslate(model, lx, ly, lz);
 			bgfx::setTransform(model);
 			bgfx::setTexture(0, s_albedo, white_tex);
@@ -449,16 +444,11 @@ int main(int argc, char** argv)
 			bgfx::setIndexBuffer(bulb_ibh);
 			bgfx::submit(0, program);
 		};
-		const size_t bulb_count = level.light_positions.size() / 3;
-		if (bulb_count == 0) {
+		if (level.lights.empty()) {
 			draw_bulb(0.0f, 4.0f, 0.0f);
 		} else {
-			for (size_t li = 0; li < bulb_count; ++li) {
-				draw_bulb(
-					level.light_positions[li * 3 + 0],
-					level.light_positions[li * 3 + 1],
-					level.light_positions[li * 3 + 2]
-				);
+			for (const engine::Light& L : level.lights) {
+				draw_bulb(L.pos.x, L.pos.y, L.pos.z);
 			}
 		}
 
@@ -484,10 +474,9 @@ int main(int argc, char** argv)
 	bgfx::destroy(program);
 	bgfx::destroy(bulb_ibh);
 	bgfx::destroy(bulb_vbh);
-	if (bgfx::isValid(wall_vbh)) {
-		bgfx::destroy(wall_vbh);
-	}
-	bgfx::destroy(floor_vbh);
+	if (bgfx::isValid(stair_vbh)) bgfx::destroy(stair_vbh);
+	if (bgfx::isValid(wall_vbh)) bgfx::destroy(wall_vbh);
+	if (bgfx::isValid(floor_vbh)) bgfx::destroy(floor_vbh);
 	bgfx::shutdown();
 
 	SDL_DestroyWindow(window);
