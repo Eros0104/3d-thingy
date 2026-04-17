@@ -56,6 +56,7 @@ struct Wall {
 	Vec2 b;
 	float y0 = 0.0f;              ///< Bottom of wall in world Y.
 	float y1 = 3.2f;              ///< Top of wall in world Y.
+	float thickness = 0.2f;       ///< Visual thickness perpendicular to the segment (meters).
 	float door_width = 1.2f;      ///< Only meaningful when type == Door.
 	float door_offset = -1.0f;    ///< < 0 means "center the opening along the segment".
 	float door_height = 2.2f;     ///< Height of the opening above y0.

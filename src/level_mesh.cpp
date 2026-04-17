@@ -154,29 +154,28 @@ void emit_sector_floor_and_ceiling(std::vector<LitVertex>& out, const Sector& s)
 	}
 }
 
-// ---------------- Wall quads (double-sided) -------------------------------------------------
+// ---------------- Wall prism (thick segments) ------------------------------------------------
 
-/// Emit a single vertical quad along the line from point a to point b, at heights [y0, y1].
-/// Zero-thickness: rendered with no face culling and two-sided lighting (fragment shader uses
-/// |dot(N, L)|), so a single quad is visible and lit from either side without z-fighting.
-void emit_wall_quad(
+Vec2 lerp_vec2(Vec2 a, Vec2 b, float t)
+{
+	return Vec2{a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t};
+}
+
+/// Emit a vertical quad from world point `a` to `b` spanning [y0, y1] with the given outward
+/// normal. U coordinate runs from u0 at `a` to u1 at `b`; V follows world Y.
+void emit_vertical_quad(
 	std::vector<LitVertex>& out,
 	Vec2 a, Vec2 b,
 	float y0, float y1,
 	float u0, float u1,
+	float nx, float nz,
 	uint32_t abgr)
 {
-	const float dx = b.x - a.x;
-	const float dz = b.z - a.z;
-	const float len = std::sqrt(dx * dx + dz * dz);
-	if (len <= 1e-6f || y1 <= y0) {
+	if (y1 <= y0) {
 		return;
 	}
-	const float nx = -dz / len;
-	const float nz = dx / len;
 	const float v0 = y0 * k_wall_uv_scale;
 	const float v1 = y1 * k_wall_uv_scale;
-
 	push_v(out, a.x, y0, a.z, nx, 0, nz, u0, v0, abgr);
 	push_v(out, b.x, y0, b.z, nx, 0, nz, u1, v0, abgr);
 	push_v(out, b.x, y1, b.z, nx, 0, nz, u1, v1, abgr);
@@ -185,9 +184,95 @@ void emit_wall_quad(
 	push_v(out, a.x, y1, a.z, nx, 0, nz, u0, v1, abgr);
 }
 
-Vec2 lerp_vec2(Vec2 a, Vec2 b, float t)
+/// Emit a horizontal quad (y fixed) covering the rectangle a→b→c→d with the given Y-normal
+/// direction (+Y for floors, -Y for ceilings / door heads / wall tops viewed from below).
+void emit_horizontal_quad(
+	std::vector<LitVertex>& out,
+	Vec2 a, Vec2 b, Vec2 c, Vec2 d,
+	float y,
+	float ny,
+	uint32_t abgr)
 {
-	return Vec2{a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t};
+	const auto v = [&](Vec2 p) {
+		push_v(out, p.x, y, p.z, 0.0f, ny, 0.0f,
+			p.x * k_floor_uv_per_world, p.z * k_floor_uv_per_world, abgr);
+	};
+	v(a); v(b); v(c);
+	v(a); v(c); v(d);
+}
+
+/// Emit one vertical "face" of a thick wall — a quad along the segment `(a, b)` spanning
+/// [y0, y1] — with the variant cutout applied (door opening, broken-wall trim, window slit).
+/// `nx, nz` is the outward normal for this face.
+void emit_face_with_variant(
+	std::vector<LitVertex>& out,
+	const Wall& w,
+	Vec2 a, Vec2 b,
+	float seg_len,
+	float nx, float nz)
+{
+	const float u_total = seg_len * k_wall_uv_scale;
+
+	switch (w.type) {
+	case WallType::Normal:
+		emit_vertical_quad(out, a, b, w.y0, w.y1, 0.0f, u_total, nx, nz, k_wall_abgr);
+		break;
+	case WallType::Door: {
+		float door_w = w.door_width;
+		if (door_w > seg_len) door_w = seg_len;
+		float door_off = w.door_offset;
+		if (door_off < 0.0f) door_off = 0.5f * (seg_len - door_w);
+		if (door_off < 0.0f) door_off = 0.0f;
+		if (door_off + door_w > seg_len) door_off = seg_len - door_w;
+		const float t0 = door_off / seg_len;
+		const float t1 = (door_off + door_w) / seg_len;
+		const float door_top_y = w.y0 + w.door_height;
+		const float top_y = door_top_y < w.y1 ? door_top_y : w.y1;
+
+		const Vec2 p0 = lerp_vec2(a, b, t0);
+		const Vec2 p1 = lerp_vec2(a, b, t1);
+		if (t0 > 0.0f) {
+			emit_vertical_quad(out, a, p0, w.y0, w.y1, 0.0f, t0 * u_total, nx, nz, k_wall_abgr);
+		}
+		if (t1 < 1.0f) {
+			emit_vertical_quad(out, p1, b, w.y0, w.y1, t1 * u_total, u_total, nx, nz, k_wall_abgr);
+		}
+		if (w.y1 > top_y) {
+			emit_vertical_quad(out, p0, p1, top_y, w.y1, t0 * u_total, t1 * u_total, nx, nz, k_wall_abgr);
+		}
+		break;
+	}
+	case WallType::Broken: {
+		float top = w.y0 + k_broken_wall_height;
+		if (top > w.y1) top = w.y1;
+		emit_vertical_quad(out, a, b, w.y0, top, 0.0f, u_total, nx, nz, k_wall_abgr);
+		break;
+	}
+	case WallType::Window: {
+		const float sill = w.y0 + k_window_sill_h;
+		const float wtop = w.y0 + k_window_top_h;
+		const float s = sill < w.y1 ? sill : w.y1;
+		const float t = wtop < w.y1 ? wtop : w.y1;
+		if (s > w.y0) {
+			emit_vertical_quad(out, a, b, w.y0, s, 0.0f, u_total, nx, nz, k_wall_abgr);
+		}
+		if (w.y1 > t) {
+			emit_vertical_quad(out, a, b, t, w.y1, 0.0f, u_total, nx, nz, k_wall_abgr);
+		}
+		break;
+	}
+	}
+}
+
+/// Returns the top Y of the wall body — below any lintel/remnant limit. Controls how tall the
+/// top cap / end caps of the prism are.
+float wall_body_top_y(const Wall& w)
+{
+	if (w.type == WallType::Broken) {
+		const float top = w.y0 + k_broken_wall_height;
+		return top < w.y1 ? top : w.y1;
+	}
+	return w.y1;
 }
 
 void emit_wall(std::vector<LitVertex>& out, const Wall& w)
@@ -198,64 +283,74 @@ void emit_wall(std::vector<LitVertex>& out, const Wall& w)
 	if (len <= 1e-6f || w.y1 <= w.y0) {
 		return;
 	}
-	const float u_total = len * k_wall_uv_scale;
 
-	switch (w.type) {
-	case WallType::Normal:
-		emit_wall_quad(out, w.a, w.b, w.y0, w.y1, 0.0f, u_total, k_wall_abgr);
-		break;
-	case WallType::Door: {
+	const float half_t = 0.5f * w.thickness;
+	if (half_t <= 1e-4f) {
+		// Zero thickness — emit a single quad (old behavior, double-sided via abs() shader).
+		const float nx = -dz / len;
+		const float nz = dx / len;
+		emit_face_with_variant(out, w, w.a, w.b, len, nx, nz);
+		return;
+	}
+
+	// Unit direction and outward perpendicular (left side has normal +perp, right side -perp).
+	const float ux = dx / len;
+	const float uz = dz / len;
+	const float px = -uz;
+	const float pz = ux;
+
+	const Vec2 a_left{w.a.x + px * half_t, w.a.z + pz * half_t};
+	const Vec2 b_left{w.b.x + px * half_t, w.b.z + pz * half_t};
+	const Vec2 a_right{w.a.x - px * half_t, w.a.z - pz * half_t};
+	const Vec2 b_right{w.b.x - px * half_t, w.b.z - pz * half_t};
+
+	// Left and right side faces carry the variant's cutouts.
+	emit_face_with_variant(out, w, a_left, b_left, len, px, pz);
+	emit_face_with_variant(out, w, a_right, b_right, len, -px, -pz);
+
+	// Top cap (at body_top_y) so you don't see into the wall from above.
+	const float body_top = wall_body_top_y(w);
+	if (body_top > w.y0) {
+		emit_horizontal_quad(out, a_left, b_left, b_right, a_right, body_top, 1.0f, k_wall_abgr);
+	}
+
+	// End caps seal the segment endpoints. Small overlap with neighboring walls at corners is
+	// acceptable for a 0.2m-ish thickness; tidy miters can come later from a junction graph.
+	if (body_top > w.y0) {
+		emit_vertical_quad(out, a_left, a_right, w.y0, body_top, 0.0f, w.thickness * k_wall_uv_scale,
+			-ux, -uz, k_wall_abgr);
+		emit_vertical_quad(out, b_right, b_left, w.y0, body_top, 0.0f, w.thickness * k_wall_uv_scale,
+			ux, uz, k_wall_abgr);
+	}
+
+	// Door jambs — interior surfaces of the opening (left / right / head).
+	if (w.type == WallType::Door) {
 		float door_w = w.door_width;
 		if (door_w > len) door_w = len;
 		float door_off = w.door_offset;
-		if (door_off < 0.0f) {
-			door_off = 0.5f * (len - door_w);
-		}
+		if (door_off < 0.0f) door_off = 0.5f * (len - door_w);
 		if (door_off < 0.0f) door_off = 0.0f;
 		if (door_off + door_w > len) door_off = len - door_w;
 		const float t0 = door_off / len;
 		const float t1 = (door_off + door_w) / len;
 		const float door_top_y = w.y0 + w.door_height;
-		const float top_y = door_top_y < w.y1 ? door_top_y : w.y1;
+		const float head_y = door_top_y < w.y1 ? door_top_y : w.y1;
 
-		const Vec2 l = w.a;
-		const Vec2 p0 = lerp_vec2(w.a, w.b, t0);
-		const Vec2 p1 = lerp_vec2(w.a, w.b, t1);
-		const Vec2 r = w.b;
+		const Vec2 p0_left = lerp_vec2(a_left, b_left, t0);
+		const Vec2 p0_right = lerp_vec2(a_right, b_right, t0);
+		const Vec2 p1_left = lerp_vec2(a_left, b_left, t1);
+		const Vec2 p1_right = lerp_vec2(a_right, b_right, t1);
 
-		// Left strip
-		if (t0 > 0.0f) {
-			emit_wall_quad(out, l, p0, w.y0, w.y1, 0.0f, t0 * u_total, k_wall_abgr);
+		if (head_y > w.y0) {
+			// Near jamb (at t0). Outward normal faces into the opening (+ascent direction).
+			emit_vertical_quad(out, p0_left, p0_right, w.y0, head_y,
+				0.0f, w.thickness * k_wall_uv_scale, ux, uz, k_wall_abgr);
+			// Far jamb (at t1). Outward normal faces into the opening (-ascent direction).
+			emit_vertical_quad(out, p1_right, p1_left, w.y0, head_y,
+				0.0f, w.thickness * k_wall_uv_scale, -ux, -uz, k_wall_abgr);
+			// Door head — ceiling inside the opening, facing down.
+			emit_horizontal_quad(out, p0_left, p1_left, p1_right, p0_right, head_y, -1.0f, k_wall_abgr);
 		}
-		// Right strip
-		if (t1 < 1.0f) {
-			emit_wall_quad(out, p1, r, w.y0, w.y1, t1 * u_total, u_total, k_wall_abgr);
-		}
-		// Lintel above door
-		if (w.y1 > top_y) {
-			emit_wall_quad(out, p0, p1, top_y, w.y1, t0 * u_total, t1 * u_total, k_wall_abgr);
-		}
-		break;
-	}
-	case WallType::Broken: {
-		float top = w.y0 + k_broken_wall_height;
-		if (top > w.y1) top = w.y1;
-		emit_wall_quad(out, w.a, w.b, w.y0, top, 0.0f, u_total, k_wall_abgr);
-		break;
-	}
-	case WallType::Window: {
-		const float sill = w.y0 + k_window_sill_h;
-		const float wtop = w.y0 + k_window_top_h;
-		const float s = sill < w.y1 ? sill : w.y1;
-		const float t = wtop < w.y1 ? wtop : w.y1;
-		if (s > w.y0) {
-			emit_wall_quad(out, w.a, w.b, w.y0, s, 0.0f, u_total, k_wall_abgr);
-		}
-		if (w.y1 > t) {
-			emit_wall_quad(out, w.a, w.b, t, w.y1, 0.0f, u_total, k_wall_abgr);
-		}
-		break;
-	}
 	}
 }
 

@@ -155,19 +155,19 @@ function draw_walls() {
     const wall = level.walls[i];
     const a = world_to_screen(wall.a[0], wall.a[1]);
     const b = world_to_screen(wall.b[0], wall.b[1]);
+    const thickness_px = Math.max((wall.thickness || 0.2) * editor.view.scale, 2);
     ctx.strokeStyle = WALL_COLORS[wall.type] || '#ffffff';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = thickness_px;
+    ctx.lineCap = 'butt';
     ctx.beginPath();
     ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
     ctx.stroke();
 
-    if (wall.type === 'door') {
-      // Draw a gap in the middle of the segment for visual clarity.
-      draw_door_marker(wall);
-    }
+    if (wall.type === 'door') draw_door_marker(wall);
     if (wall.type === 'broken') draw_dashes(a, b, 6);
     if (wall.type === 'window') draw_dashes(a, b, 3);
   }
+  ctx.lineCap = 'butt';
 }
 
 function draw_door_marker(wall) {
@@ -542,6 +542,7 @@ canvas.addEventListener('mousedown', (ev) => {
           b: [w.x, w.z],
           y0: editor.default_floor_y,
           y1: editor.default_ceiling_y,
+          thickness: 0.2,
           door_width: 1.2,
           door_offset: -1,
           door_height: 2.2,
@@ -758,6 +759,7 @@ function render_wall_edit(i, w) {
     </select></label>
     ${field('f-wall-y0', 'y0', w.y0)}
     ${field('f-wall-y1', 'y1', w.y1)}
+    ${field('f-wall-thick', 'thickness', w.thickness ?? 0.2, '0.05')}
     ${field('f-wall-dw', 'door_width', w.door_width)}
     ${field('f-wall-doff', 'door_offset (-1=center)', w.door_offset)}
     ${field('f-wall-dh', 'door_height', w.door_height)}
@@ -769,6 +771,7 @@ function wire_wall_edit(i) {
   document.getElementById('f-wall-type').onchange = (e) => { w.type = e.target.value; render(); };
   document.getElementById('f-wall-y0').oninput = (e) => { w.y0 = parseFloat(e.target.value); render(); };
   document.getElementById('f-wall-y1').oninput = (e) => { w.y1 = parseFloat(e.target.value); render(); };
+  document.getElementById('f-wall-thick').oninput = (e) => { w.thickness = parseFloat(e.target.value); render(); };
   document.getElementById('f-wall-dw').oninput = (e) => { w.door_width = parseFloat(e.target.value); render(); };
   document.getElementById('f-wall-doff').oninput = (e) => { w.door_offset = parseFloat(e.target.value); render(); };
   document.getElementById('f-wall-dh').oninput = (e) => { w.door_height = parseFloat(e.target.value); render(); };
@@ -950,6 +953,7 @@ function import_level(text) {
     type: w.type ?? 'normal',
     a: w.a, b: w.b,
     y0: w.y0 ?? 0, y1: w.y1 ?? (obj.wall_height ?? 3.2),
+    thickness: w.thickness ?? 0.2,
     door_width: w.door_width ?? 1.2,
     door_offset: w.door_offset ?? -1,
     door_height: w.door_height ?? 2.2,
