@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>fps-engine level editor (v2)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>fps-engine level editor — sectors + segments</h1>
+    <div class="meta">
+      <label>name <input id="level-name" type="text" value="untitled" /></label>
+      <label>wall_height <input id="level-wall-height" type="number" step="0.1" value="3.2" /></label>
+      <label>grid <input id="grid-step" type="number" step="0.5" value="0.5" min="0.1" /></label>
+      <label><input id="snap" type="checkbox" checked /> snap</label>
+    </div>
+  </header>
+
+  <main>
+    <aside class="sidebar">
+      <section>
+        <h2>tool</h2>
+        <div id="tool-palette" class="tool-palette">
+          <button data-tool="select">select / move</button>
+          <button data-tool="wall">draw wall</button>
+          <button data-tool="sector">draw sector</button>
+          <button data-tool="stair">place stair</button>
+          <button data-tool="light">place light</button>
+          <button data-tool="spawn">set spawn</button>
+          <button data-tool="erase">erase</button>
+        </div>
+        <p id="tool-hint" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>wall type (for new walls)</h2>
+        <div id="wall-type-palette" class="chip-palette">
+          <button data-type="normal">normal</button>
+          <button data-type="door">door</button>
+          <button data-type="broken">broken</button>
+          <button data-type="window">window</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>default Y (for new sectors/walls)</h2>
+        <label>floor_y <input id="default-floor-y" type="number" step="0.1" value="0.0" /></label>
+        <label>ceiling_y <input id="default-ceiling-y" type="number" step="0.1" value="3.2" /></label>
+      </section>
+
+      <section>
+        <h2>selection</h2>
+        <div id="selection-info" class="selection-info">(nothing selected)</div>
+      </section>
+
+      <section>
+        <h2>file</h2>
+        <button id="export-json" class="primary" type="button">export .json</button>
+        <button id="import-json" type="button">import .json</button>
+        <input id="import-file" type="file" accept=".json" hidden />
+        <button id="load-mansion" type="button">load mansion.json</button>
+      </section>
+
+      <section>
+        <h2>counts</h2>
+        <div id="counts" class="counts"></div>
+      </section>
+    </aside>
+
+    <section class="canvas-area">
+      <canvas id="grid" width="1200" height="800"></canvas>
+      <div class="legend">
+        <span><span class="swatch" style="background:#78a4d6"></span>normal wall</span>
+        <span><span class="swatch" style="background:#d6c878"></span>door</span>
+        <span><span class="swatch" style="background:#d68a78"></span>broken</span>
+        <span><span class="swatch" style="background:#8ed6c8"></span>window</span>
+        <span><span class="swatch" style="background:#3a3f4f"></span>sector</span>
+        <span><span class="swatch" style="background:#e8b84e"></span>stair</span>
+        <span><span class="swatch" style="background:#f3e97a"></span>light</span>
+        <span><span class="swatch" style="background:#8cff9c"></span>spawn</span>
+      </div>
+      <div class="canvas-shortcuts">
+        drag-mid or space+drag = pan &middot; wheel = zoom &middot; enter = close sector &middot; esc = cancel &middot; backspace = delete selection
+      </div>
+    </section>
+  </main>
+
+  <script src="editor.js" type="module"></script>
+</body>
+</html>
