@@ -158,48 +158,42 @@ bool body_hits_any_wall(
 	return false;
 }
 
-/// True if the cell that (wx, wz) lies in would be an unreachable ledge — a sector whose
-/// floor_y is more than step_up above feet_y, or a stair step similarly too tall.
+/// True if (wx, wz) has walkable structure overhead (sector floor or stair) but none of those
+/// surfaces is reachable from `feet_y` within `step_up`. Stairs and sectors count equally: if
+/// ANY walkable surface at this point is reachable, movement is allowed (e.g. walking onto a
+/// stair cell whose step is climbable even though the sector floor above is not). Empty void
+/// (no sector, no stair) does not block — the player falls naturally.
 bool cliff_blocks_climb(const Level& level, float wx, float wz, float feet_y, float step_up)
 {
 	const Vec2 p{wx, wz};
-	float highest_floor = k_no_surface;
-	bool any_sector = false;
+	bool any_walkable = false;
+	bool any_reachable = false;
+	const float max_y = feet_y + step_up;
+
 	for (const Sector& s : level.sectors) {
 		if (!point_in_polygon(s.polygon, p)) {
 			continue;
 		}
-		any_sector = true;
-		if (s.floor_y > highest_floor) {
-			highest_floor = s.floor_y;
+		any_walkable = true;
+		if (s.floor_y <= max_y) {
+			any_reachable = true;
+			break;
 		}
 	}
-	if (any_sector) {
-		// Is there a reachable sector here? One whose floor_y <= feet_y + step_up.
-		bool reachable = false;
-		for (const Sector& s : level.sectors) {
-			if (!point_in_polygon(s.polygon, p)) {
+	if (!any_reachable) {
+		for (const Stair& s : level.stairs) {
+			const float y = stair_surface_y_at(s, wx, wz);
+			if (y == k_no_surface) {
 				continue;
 			}
-			if (s.floor_y <= feet_y + step_up) {
-				reachable = true;
+			any_walkable = true;
+			if (y <= max_y) {
+				any_reachable = true;
 				break;
 			}
 		}
-		if (!reachable) {
-			return true;
-		}
 	}
-	for (const Stair& s : level.stairs) {
-		const float y = stair_surface_y_at(s, wx, wz);
-		if (y == k_no_surface) {
-			continue;
-		}
-		if (y > feet_y + step_up) {
-			return true;
-		}
-	}
-	return false;
+	return any_walkable && !any_reachable;
 }
 
 bool body_hits_wall_or_cliff(
