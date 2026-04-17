@@ -147,7 +147,10 @@ bool body_hits_any_wall(
 			continue;
 		}
 		const SegProj proj = project_to_segment(w.a, w.b, px, pz);
-		if (proj.dist >= radius) {
+		// Walls have visual thickness; inflate the collision radius so the player stops at the
+		// outer face rather than clipping into the wall side.
+		const float effective_radius = radius + 0.5f * w.thickness;
+		if (proj.dist >= effective_radius) {
 			continue;
 		}
 		if (wall_is_passable(w, proj, feet_y)) {

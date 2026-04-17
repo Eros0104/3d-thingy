@@ -153,6 +153,10 @@ bool parse_wall(const json& jw, float default_wall_height, Wall& out, std::strin
 		err = "wall y1 must be > y0";
 		return false;
 	}
+	out.thickness = 0.2f;
+	get_float(jw, "thickness", out.thickness);
+	if (out.thickness < 0.0f) out.thickness = 0.0f;
+
 	out.door_width = 1.2f;
 	out.door_offset = -1.0f;
 	out.door_height = 2.2f;

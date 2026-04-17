@@ -11,7 +11,7 @@ namespace engine {
 /// Compact binary representation of a v2 `Level`. All fields little-endian.
 ///
 ///   magic       : char[4]  = "EVIL"
-///   version     : uint32   = 2
+///   version     : uint32   = 3
 ///   name_len    : uint32 + bytes
 ///   wall_height : float32
 ///   ambient     : float32[3]
@@ -26,7 +26,7 @@ namespace engine {
 ///   for each wall:
 ///     type : uint8 (WallType)
 ///     a.x, a.z, b.x, b.z : float32 x 4
-///     y0, y1 : float32 x 2
+///     y0, y1, thickness : float32 x 3
 ///     door_width, door_offset, door_height : float32 x 3
 ///   stairs_n : uint32
 ///   for each stair:
@@ -39,7 +39,7 @@ namespace engine {
 ///     color : float32[3]
 ///     intensity : float32
 constexpr char k_evil_magic[4] = {'E', 'V', 'I', 'L'};
-constexpr uint32_t k_evil_version = 2;
+constexpr uint32_t k_evil_version = 3;
 
 /// Serialize `level` into a byte vector.
 void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes);

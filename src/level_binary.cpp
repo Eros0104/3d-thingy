@@ -136,6 +136,7 @@ void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes)
 		write_f32(out_bytes, w.b.z);
 		write_f32(out_bytes, w.y0);
 		write_f32(out_bytes, w.y1);
+		write_f32(out_bytes, w.thickness);
 		write_f32(out_bytes, w.door_width);
 		write_f32(out_bytes, w.door_offset);
 		write_f32(out_bytes, w.door_height);
@@ -247,6 +248,7 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 		if (!r.read_f32(w.a.x) || !r.read_f32(w.a.z)
 			|| !r.read_f32(w.b.x) || !r.read_f32(w.b.z)
 			|| !r.read_f32(w.y0) || !r.read_f32(w.y1)
+			|| !r.read_f32(w.thickness)
 			|| !r.read_f32(w.door_width) || !r.read_f32(w.door_offset) || !r.read_f32(w.door_height)) {
 			err = "truncated wall";
 			return false;
