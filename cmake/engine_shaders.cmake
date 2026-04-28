@@ -1,5 +1,6 @@
-# Embedded triangle shaders via bgfx::shaderc (uses _bgfx_* helpers from bgfxToolUtils.cmake).
+# Embedded shaders via bgfx::shaderc (uses _bgfx_* helpers from bgfxToolUtils.cmake).
 # Apple: skip spirv for --platform osx (shaderc currently fails on SPIRV path for these sources).
+# The skinned shader needs more uniform space than ES2 allows, so it skips 100_es.
 
 function(engine_add_triangle_shaders target)
 	set(varying_def "${CMAKE_SOURCE_DIR}/shaders/varying.def.sc")
@@ -7,13 +8,16 @@ function(engine_add_triangle_shaders target)
 
 	if(APPLE)
 		set(platform_i OSX)
-		set(profiles metal 120 100_es)
+		set(profiles_lit metal 120)
+		set(profiles_skinned metal 120)
 	elseif(UNIX)
 		set(platform_i LINUX)
-		set(profiles spirv 120 100_es)
+		set(profiles_lit spirv 120 100_es)
+		set(profiles_skinned spirv 120)
 	elseif(WIN32)
 		set(platform_i WINDOWS)
-		set(profiles spirv 120 100_es s_5_0 s_6_0)
+		set(profiles_lit spirv 120 100_es s_5_0 s_6_0)
+		set(profiles_skinned spirv 120 s_5_0 s_6_0)
 	else()
 		message(FATAL_ERROR "Unsupported platform for engine_add_triangle_shaders")
 	endif()
@@ -21,16 +25,30 @@ function(engine_add_triangle_shaders target)
 	set(all_outputs "")
 
 	foreach(shader_path IN ITEMS
-		"${CMAKE_SOURCE_DIR}/shaders/vs_triangle.sc"
-		"${CMAKE_SOURCE_DIR}/shaders/fs_triangle.sc"
+		"${CMAKE_SOURCE_DIR}/shaders/vs_triangle.sc:lit"
+		"${CMAKE_SOURCE_DIR}/shaders/fs_triangle.sc:lit"
+		"${CMAKE_SOURCE_DIR}/shaders/vs_skinned.sc:skinned"
+		"${CMAKE_SOURCE_DIR}/shaders/fs_skinned.sc:skinned"
+		"${CMAKE_SOURCE_DIR}/shaders/vs_debug.sc:lit"
+		"${CMAKE_SOURCE_DIR}/shaders/fs_debug.sc:lit"
 	)
-		get_filename_component(shader_basename "${shader_path}" NAME)
-		get_filename_component(shader_we "${shader_path}" NAME_WE)
+		string(REPLACE ":" ";" shader_pair "${shader_path}")
+		list(GET shader_pair 0 shader_file)
+		list(GET shader_pair 1 shader_kind)
+
+		get_filename_component(shader_basename "${shader_file}" NAME)
+		get_filename_component(shader_we "${shader_file}" NAME_WE)
 
 		if(shader_we MATCHES "^vs_")
 			set(stype VERTEX)
 		else()
 			set(stype FRAGMENT)
+		endif()
+
+		if(shader_kind STREQUAL "skinned")
+			set(profiles ${profiles_skinned})
+		else()
+			set(profiles ${profiles_lit})
 		endif()
 
 		foreach(profile IN LISTS profiles)
@@ -45,7 +63,7 @@ function(engine_add_triangle_shaders target)
 				BIN2C ${bin2c_name}
 				${stype} ${platform_i}
 				WERROR
-				FILE "${shader_path}"
+				FILE "${shader_file}"
 				OUTPUT "${output}"
 				PROFILE ${profile}
 				O 3
@@ -57,7 +75,7 @@ function(engine_add_triangle_shaders target)
 				OUTPUT "${output}"
 				COMMAND ${CMAKE_COMMAND} -E make_directory "${out_dir}/${profile_path_ext}"
 				COMMAND bgfx::shaderc ${cli}
-				MAIN_DEPENDENCY "${shader_path}"
+				MAIN_DEPENDENCY "${shader_file}"
 				DEPENDS "${varying_def}"
 				VERBATIM
 			)

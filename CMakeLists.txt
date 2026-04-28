@@ -95,18 +95,25 @@ add_executable(fps_engine
   src/level_binary.cpp
   src/shader_program.cpp
   src/texture_loader.cpp
+  src/viewmodel.cpp
   src/ecs.cpp
   shaders/vs_triangle.sc
   shaders/fs_triangle.sc
+  shaders/vs_skinned.sc
+  shaders/fs_skinned.sc
+  shaders/vs_debug.sc
+  shaders/fs_debug.sc
 )
 
 target_compile_definitions(fps_engine PRIVATE
   "ENGINE_TEXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/textures\""
   "ENGINE_MAPS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/maps\""
+  "ENGINE_MODELS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/models\""
 )
 
 target_include_directories(fps_engine PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/external/cgltf"
   "${SHADER_GEN_DIR}"
 )
 
@@ -138,12 +145,15 @@ target_link_libraries(level_pack PRIVATE
 
 if(APPLE)
   target_link_libraries(fps_engine PRIVATE "-framework Cocoa")
-  # We only embed metal/glsl/essl for macOS; silence SPIRV/WGSL slots in BGFX_EMBEDDED_SHADER.
+  # We only embed metal/glsl for macOS; silence SPIRV/WGSL/ESSL slots in BGFX_EMBEDDED_SHADER.
+  # ESSL is dropped because the skinned shader needs dynamic uniform array indexing in the
+  # vertex shader, which isn't permitted in GLSL ES 1.00.
   target_compile_definitions(
     fps_engine
     PRIVATE
       BGFX_PLATFORM_SUPPORTS_SPIRV=0
       BGFX_PLATFORM_SUPPORTS_WGSL=0
+      BGFX_PLATFORM_SUPPORTS_ESSL=0
   )
 endif()
 

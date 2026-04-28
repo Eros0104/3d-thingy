@@ -8,6 +8,7 @@
 #include "physics_world.hpp"
 #include "shader_program.hpp"
 #include "texture_loader.hpp"
+#include "viewmodel.hpp"
 
 #include <SDL.h>
 #include <SDL_syswm.h>
@@ -32,6 +33,10 @@
 
 #ifndef ENGINE_MAPS_DIR
 #define ENGINE_MAPS_DIR "maps"
+#endif
+
+#ifndef ENGINE_MODELS_DIR
+#define ENGINE_MODELS_DIR "models"
 #endif
 
 namespace {
@@ -257,11 +262,23 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
+	const bgfx::ProgramHandle skinned_program = engine::load_skinned_program();
+	if (!bgfx::isValid(skinned_program)) {
+		std::fprintf(stderr, "Skinned program creation failed\n");
+	}
+
+	const bgfx::ProgramHandle debug_program = engine::load_debug_program();
+	if (!bgfx::isValid(debug_program)) {
+		std::fprintf(stderr, "Debug program creation failed\n");
+	}
+
 	const bgfx::UniformHandle u_light_pos = bgfx::createUniform("u_lightPos", bgfx::UniformType::Vec4, k_max_shader_lights);
 	const bgfx::UniformHandle u_light_color = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4, k_max_shader_lights);
 	const bgfx::UniformHandle u_light_params = bgfx::createUniform("u_lightParams", bgfx::UniformType::Vec4);
 	const bgfx::UniformHandle u_ambient = bgfx::createUniform("u_ambient", bgfx::UniformType::Vec4);
 	const bgfx::UniformHandle s_albedo = bgfx::createUniform("s_albedo", bgfx::UniformType::Sampler);
+	const bgfx::UniformHandle u_bones = bgfx::createUniform("u_bones", bgfx::UniformType::Mat4, 120);
+	const bgfx::UniformHandle u_baseColor = bgfx::createUniform("u_baseColor", bgfx::UniformType::Vec4);
 
 	static const uint32_t k_white_rgba = 0xffffffffu;
 	const bgfx::Memory* white_mem = bgfx::copy(&k_white_rgba, sizeof(k_white_rgba));
@@ -303,6 +320,20 @@ int main(int argc, char** argv)
 	engine::ecs_bootstrap(registry);
 	(void)registry;
 
+	engine::Viewmodel viewmodel;
+	{
+		std::string vm_err;
+		if (!viewmodel.load(ENGINE_MODELS_DIR "/animated_pistol.glb", vm_err)) {
+			std::fprintf(stderr, "viewmodel load: %s\n", vm_err.c_str());
+		} else {
+			viewmodel.play(engine::ViewmodelAnim::Take, false, true);
+		}
+	}
+
+	// View 1 is the viewmodel pass: it shares the camera projection but clears depth so the
+	// weapon never z-fights or pokes through walls.
+	bgfx::setViewClear(1, BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
+
 	FpsCamera camera;
 	camera.eyeX = level.spawn.pos.x;
 	camera.eyeY = level.spawn.pos.y + engine::PlayerPhysics::k_eye_height + 0.02f;
@@ -311,6 +342,7 @@ int main(int argc, char** argv)
 
 	engine::PlayerPhysics player_physics;
 	bool mouseLook = true;
+	bool show_axes_gizmo = false;
 	if (SDL_SetRelativeMouseMode(mouseLook ? SDL_TRUE : SDL_FALSE) != 0) {
 		std::fprintf(stderr, "SDL_SetRelativeMouseMode: %s\n", SDL_GetError());
 	}
@@ -320,6 +352,8 @@ int main(int argc, char** argv)
 	while (running) {
 		float mouseRelX = 0.0f;
 		float mouseRelY = 0.0f;
+		bool shoot_pressed = false;
+		bool reload_pressed = false;
 
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
@@ -328,6 +362,12 @@ int main(int argc, char** argv)
 			} else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
 				mouseLook = !mouseLook;
 				SDL_SetRelativeMouseMode(mouseLook ? SDL_TRUE : SDL_FALSE);
+			} else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_r && !event.key.repeat) {
+				reload_pressed = true;
+			} else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_g && !event.key.repeat) {
+				show_axes_gizmo = !show_axes_gizmo;
+			} else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT && mouseLook) {
+				shoot_pressed = true;
 			} else if (event.type == SDL_MOUSEMOTION && mouseLook) {
 				mouseRelX += static_cast<float>(event.motion.xrel);
 				mouseRelY += static_cast<float>(event.motion.yrel);
@@ -372,11 +412,33 @@ int main(int argc, char** argv)
 		bgfx::setViewTransform(0, view, proj);
 
 		bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+		bgfx::setViewRect(1, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+		bgfx::setViewTransform(1, view, proj);
 		bgfx::touch(0);
 
+		// Animation control: explicit input wins; otherwise loop Idle once one-shots end.
+		if (viewmodel.valid()) {
+			if (shoot_pressed) {
+				viewmodel.play(engine::ViewmodelAnim::Shoot, false, true);
+			} else if (reload_pressed) {
+				viewmodel.play(engine::ViewmodelAnim::Reload, false, true);
+			} else {
+				const engine::ViewmodelAnim cur = viewmodel.current_anim();
+				const bool one_shot = cur == engine::ViewmodelAnim::Shoot
+					|| cur == engine::ViewmodelAnim::Reload
+					|| cur == engine::ViewmodelAnim::Take;
+				if (one_shot && viewmodel.current_anim_finished()) {
+					viewmodel.play(engine::ViewmodelAnim::Idle, true, false);
+				}
+			}
+			viewmodel.update(dt);
+		}
+
 		bgfx::dbgTextClear();
-		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   level=%s  sectors=%zu walls=%zu stairs=%zu",
+		bgfx::dbgTextPrintf(0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   LMB:Shoot R:Reload",
 			mouseLook ? "free cursor" : "capture",
+			show_axes_gizmo ? "on" : "off");
+		bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
 			level.name.empty() ? "(unnamed)" : level.name.c_str(),
 			level.sectors.size(), level.walls.size(), level.stairs.size());
 
@@ -452,6 +514,36 @@ int main(int argc, char** argv)
 			}
 		}
 
+		if (viewmodel.valid() && bgfx::isValid(skinned_program)) {
+			engine::ViewmodelDrawParams vmp{};
+			vmp.eye[0] = camera.eyeX;
+			vmp.eye[1] = camera.eyeY;
+			vmp.eye[2] = camera.eyeZ;
+			vmp.yaw = -camera.yaw;
+			vmp.pitch = -camera.pitch;
+			vmp.offset[0] = 0.15f;   // right
+			vmp.offset[1] = -1.575f;  // down
+			vmp.offset[2] = 0.0f;   // forward
+			vmp.tweak_pitch = 0.0f;
+			//vmp.tweak_yaw = bx::kPi;  // model's local -Z front → flip to face away from camera
+			vmp.tweak_yaw = 0.0f;  // model's local -Z front → flip to face away from camera
+			vmp.tweak_roll = 0.0f;
+			vmp.scale = 1.0f;
+			viewmodel.submit(
+				1,
+				skinned_program,
+				u_bones,
+				s_albedo,
+				u_baseColor,
+				white_tex,
+				renderState,
+				vmp
+			);
+			if (show_axes_gizmo && bgfx::isValid(debug_program)) {
+				viewmodel.submit_axes_gizmo(1, debug_program, vmp, 0.30f);
+			}
+		}
+
 		bgfx::frame();
 	}
 
@@ -459,6 +551,7 @@ int main(int argc, char** argv)
 		SDL_SetRelativeMouseMode(SDL_FALSE);
 	}
 
+	viewmodel.unload();
 	if (bgfx::isValid(floor_tex)) {
 		bgfx::destroy(floor_tex);
 	}
@@ -467,10 +560,14 @@ int main(int argc, char** argv)
 	}
 	bgfx::destroy(white_tex);
 	bgfx::destroy(s_albedo);
+	bgfx::destroy(u_baseColor);
+	bgfx::destroy(u_bones);
 	bgfx::destroy(u_ambient);
 	bgfx::destroy(u_light_params);
 	bgfx::destroy(u_light_color);
 	bgfx::destroy(u_light_pos);
+	if (bgfx::isValid(debug_program)) bgfx::destroy(debug_program);
+	if (bgfx::isValid(skinned_program)) bgfx::destroy(skinned_program);
 	bgfx::destroy(program);
 	bgfx::destroy(bulb_ibh);
 	bgfx::destroy(bulb_vbh);
