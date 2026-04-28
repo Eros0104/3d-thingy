@@ -31,6 +31,8 @@ function(engine_add_triangle_shaders target)
 		"${CMAKE_SOURCE_DIR}/shaders/fs_skinned.sc:skinned"
 		"${CMAKE_SOURCE_DIR}/shaders/vs_debug.sc:lit"
 		"${CMAKE_SOURCE_DIR}/shaders/fs_debug.sc:lit"
+		"${CMAKE_SOURCE_DIR}/shaders/vs_hud.sc:lit"
+		"${CMAKE_SOURCE_DIR}/shaders/fs_hud.sc:lit"
 	)
 		string(REPLACE ":" ";" shader_pair "${shader_path}")
 		list(GET shader_pair 0 shader_file)

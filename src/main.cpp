@@ -1,5 +1,7 @@
+#include "audio.hpp"
 #include "ecs.hpp"
 #include "fps_camera.hpp"
+#include "hud.hpp"
 #include "json_level.hpp"
 #include "level_binary.hpp"
 #include "level_data.hpp"
@@ -37,6 +39,14 @@
 
 #ifndef ENGINE_MODELS_DIR
 #define ENGINE_MODELS_DIR "models"
+#endif
+
+#ifndef ENGINE_SOUNDS_DIR
+#define ENGINE_SOUNDS_DIR "sounds"
+#endif
+
+#ifndef ENGINE_FONTS_DIR
+#define ENGINE_FONTS_DIR "fonts"
 #endif
 
 namespace {
@@ -174,6 +184,13 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
+	{
+		std::string audio_err;
+		if (!engine::audio_init(ENGINE_SOUNDS_DIR "/pistol_shot.mp3", audio_err)) {
+			std::fprintf(stderr, "audio: %s (continuing without sound)\n", audio_err.c_str());
+		}
+	}
+
 	SDL_Window* window = SDL_CreateWindow(
 		"fps-engine (SDL2 + bgfx)",
 		SDL_WINDOWPOS_CENTERED,
@@ -271,6 +288,29 @@ int main(int argc, char** argv)
 	if (!bgfx::isValid(debug_program)) {
 		std::fprintf(stderr, "Debug program creation failed\n");
 	}
+
+	const bgfx::ProgramHandle hud_program = engine::load_hud_program();
+	if (!bgfx::isValid(hud_program)) {
+		std::fprintf(stderr, "HUD program creation failed\n");
+	}
+
+	bool hud_ok = false;
+	if (bgfx::isValid(hud_program)) {
+		engine::HudInitDesc hud_desc;
+		hud_desc.font_path = ENGINE_FONTS_DIR "/moms_typewriter/moms_typewriter.ttf";
+		hud_desc.pixel_height = 36.0f;
+		hud_desc.program = hud_program;
+		std::string hud_err;
+		if (!engine::hud_init(hud_desc, hud_err)) {
+			std::fprintf(stderr, "hud: %s (continuing without HUD)\n", hud_err.c_str());
+		} else {
+			hud_ok = true;
+		}
+	}
+
+	int player_health = 100;
+	int bullets_in_clip = 8;
+	const int clip_size = 8;
 
 	const bgfx::UniformHandle u_light_pos = bgfx::createUniform("u_lightPos", bgfx::UniformType::Vec4, k_max_shader_lights);
 	const bgfx::UniformHandle u_light_color = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4, k_max_shader_lights);
@@ -419,6 +459,17 @@ int main(int argc, char** argv)
 		bgfx::setViewTransform(1, view, proj);
 		bgfx::touch(0);
 
+		if (shoot_pressed && bullets_in_clip > 0) {
+			engine::play_pistol_shot();
+			--bullets_in_clip;
+		} else if (shoot_pressed) {
+			shoot_pressed = false;
+		}
+
+		if (reload_pressed) {
+			bullets_in_clip = clip_size;
+		}
+
 		// Animation control: explicit input wins; otherwise loop Idle once one-shots end.
 		if (viewmodel.valid()) {
 			if (shoot_pressed) {
@@ -547,6 +598,31 @@ int main(int argc, char** argv)
 			}
 		}
 
+		if (hud_ok) {
+			constexpr bgfx::ViewId k_hud_view = 2;
+			engine::hud_begin_frame(k_hud_view, width, height);
+
+			constexpr uint32_t k_hud_red = 0xff2030e0; // ABGR — red with full alpha
+			const float margin_x = 28.0f;
+			const float margin_bottom = 24.0f;
+			// hud_descent() is negative (stb metric); subtracting lifts the baseline
+			// up so descenders sit just above margin_bottom from the screen edge.
+			const float baseline_y = static_cast<float>(height) - margin_bottom + engine::hud_descent();
+
+			char life_buf[16];
+			std::snprintf(life_buf, sizeof(life_buf), "%d%%", player_health);
+			engine::hud_draw_text(life_buf, margin_x, baseline_y, k_hud_red);
+
+			char ammo_buf[16];
+			std::snprintf(ammo_buf, sizeof(ammo_buf), "%d/%d", bullets_in_clip, clip_size);
+			engine::hud_draw_text_right(
+				ammo_buf,
+				static_cast<float>(width) - margin_x,
+				baseline_y,
+				k_hud_red
+			);
+		}
+
 		bgfx::frame();
 	}
 
@@ -554,6 +630,8 @@ int main(int argc, char** argv)
 		SDL_SetRelativeMouseMode(SDL_FALSE);
 	}
 
+	engine::audio_shutdown();
+	engine::hud_shutdown();
 	viewmodel.unload();
 	if (bgfx::isValid(floor_tex)) {
 		bgfx::destroy(floor_tex);
@@ -569,6 +647,7 @@ int main(int argc, char** argv)
 	bgfx::destroy(u_light_params);
 	bgfx::destroy(u_light_color);
 	bgfx::destroy(u_light_pos);
+	if (bgfx::isValid(hud_program)) bgfx::destroy(hud_program);
 	if (bgfx::isValid(debug_program)) bgfx::destroy(debug_program);
 	if (bgfx::isValid(skinned_program)) bgfx::destroy(skinned_program);
 	bgfx::destroy(program);

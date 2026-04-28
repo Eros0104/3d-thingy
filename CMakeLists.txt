@@ -87,6 +87,7 @@ set(SHADER_GEN_DIR "${CMAKE_BINARY_DIR}/generated/shaders")
 
 add_executable(fps_engine
   src/main.cpp
+  src/audio.cpp
   src/fps_camera.cpp
   src/physics_world.cpp
   src/level_data.cpp
@@ -96,6 +97,7 @@ add_executable(fps_engine
   src/shader_program.cpp
   src/texture_loader.cpp
   src/viewmodel.cpp
+  src/hud.cpp
   src/ecs.cpp
   shaders/vs_triangle.sc
   shaders/fs_triangle.sc
@@ -103,16 +105,21 @@ add_executable(fps_engine
   shaders/fs_skinned.sc
   shaders/vs_debug.sc
   shaders/fs_debug.sc
+  shaders/vs_hud.sc
+  shaders/fs_hud.sc
 )
 
 target_compile_definitions(fps_engine PRIVATE
   "ENGINE_TEXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/textures\""
   "ENGINE_MAPS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/maps\""
   "ENGINE_MODELS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/models\""
+  "ENGINE_SOUNDS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/sounds\""
+  "ENGINE_FONTS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fonts\""
 )
 
 target_include_directories(fps_engine PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/external"
   "${CMAKE_CURRENT_SOURCE_DIR}/external/cgltf"
   "${SHADER_GEN_DIR}"
 )
