@@ -2,103 +2,730 @@
   "version": 2,
   "name": "spencer_mansion_v2",
   "wall_height": 3.2,
-  "ambient": [0.07, 0.08, 0.11],
-  "spawn": { "pos": [4.0, 0.0, 3.0], "yaw_deg": 0.0 },
+  "ambient": [
+    0.07,
+    0.08,
+    0.11
+  ],
+  "spawn": {
+    "pos": [
+      4,
+      0,
+      3
+    ],
+    "yaw_deg": 0
+  },
   "sectors": [
     {
       "id": "foyer",
-      "polygon": [[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]],
-      "floor_y": 0.0,
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          8,
+          6
+        ],
+        [
+          0,
+          6
+        ]
+      ],
+      "floor_y": 0,
       "ceiling_y": 3.2
     },
     {
       "id": "study",
-      "polygon": [[8.0, 0.0], [16.0, 0.0], [16.0, 6.0], [8.0, 6.0]],
-      "floor_y": 0.0,
+      "polygon": [
+        [
+          8,
+          0
+        ],
+        [
+          16,
+          0
+        ],
+        [
+          16,
+          6
+        ],
+        [
+          8,
+          6
+        ]
+      ],
+      "floor_y": 0,
       "ceiling_y": 3.2
     },
     {
       "id": "main_hall",
-      "polygon": [[0.0, 6.0], [16.0, 6.0], [16.0, 14.0], [0.0, 14.0]],
-      "floor_y": 0.0,
+      "polygon": [
+        [
+          0,
+          6
+        ],
+        [
+          16,
+          6
+        ],
+        [
+          16,
+          14
+        ],
+        [
+          0,
+          14
+        ]
+      ],
+      "floor_y": 0,
       "ceiling_y": 3.2
     },
     {
       "id": "dining",
-      "polygon": [[0.0, 14.0], [8.0, 14.0], [8.0, 22.0], [0.0, 22.0]],
-      "floor_y": 0.0,
+      "polygon": [
+        [
+          0,
+          14
+        ],
+        [
+          8,
+          14
+        ],
+        [
+          8,
+          22
+        ],
+        [
+          0,
+          22
+        ]
+      ],
+      "floor_y": 0,
       "ceiling_y": 3.2
     },
     {
       "id": "kitchen",
-      "polygon": [[8.0, 14.0], [16.0, 14.0], [16.0, 22.0], [8.0, 22.0]],
-      "floor_y": 0.0,
+      "polygon": [
+        [
+          8,
+          14
+        ],
+        [
+          16,
+          14
+        ],
+        [
+          16,
+          22
+        ],
+        [
+          8,
+          22
+        ]
+      ],
+      "floor_y": 0,
       "ceiling_y": 3.2
     },
     {
       "id": "upper_study",
       "polygon": [
-        [16.0, 4.0],
-        [28.0, 4.0],
-        [28.0, 14.0],
-        [16.0, 14.0],
-        [16.0, 12.0],
-        [20.0, 12.0],
-        [20.0, 10.0],
-        [16.0, 10.0]
+        [
+          16,
+          4
+        ],
+        [
+          28,
+          4
+        ],
+        [
+          28,
+          14
+        ],
+        [
+          16,
+          14
+        ],
+        [
+          16,
+          12
+        ],
+        [
+          20,
+          12
+        ],
+        [
+          20,
+          10
+        ],
+        [
+          16,
+          10
+        ]
       ],
       "floor_y": 3.2,
       "ceiling_y": 6.4
     }
   ],
   "walls": [
-    { "type": "normal", "a": [0.0, 0.0], "b": [16.0, 0.0] },
-    { "type": "window", "a": [16.0, 0.0], "b": [16.0, 4.0] },
-    { "type": "normal", "a": [16.0, 4.0], "b": [16.0, 6.0] },
-    { "type": "normal", "a": [16.0, 6.0], "b": [16.0, 10.0] },
-    { "type": "normal", "a": [16.0, 12.0], "b": [16.0, 14.0] },
-    { "type": "normal", "a": [16.0, 14.0], "b": [16.0, 22.0] },
-    { "type": "normal", "a": [16.0, 22.0], "b": [0.0, 22.0] },
-    { "type": "normal", "a": [0.0, 22.0], "b": [0.0, 0.0] },
-
-    { "type": "normal", "a": [8.0, 0.0], "b": [8.0, 2.0] },
-    { "type": "door",   "a": [8.0, 2.0], "b": [8.0, 4.0], "door_width": 2.0, "door_offset": 0.0 },
-    { "type": "normal", "a": [8.0, 4.0], "b": [8.0, 6.0] },
-
-    { "type": "door",   "a": [0.0, 6.0], "b": [8.0, 6.0], "door_width": 1.6, "door_offset": 3.2 },
-    { "type": "door",   "a": [8.0, 6.0], "b": [16.0, 6.0], "door_width": 1.6, "door_offset": 3.2 },
-
-    { "type": "door",   "a": [0.0, 14.0], "b": [8.0, 14.0], "door_width": 1.6, "door_offset": 3.2 },
-    { "type": "broken", "a": [8.0, 14.0], "b": [16.0, 14.0] },
-
-    { "type": "normal", "a": [8.0, 14.0], "b": [8.0, 18.0] },
-    { "type": "window", "a": [8.0, 18.0], "b": [8.0, 20.0] },
-    { "type": "normal", "a": [8.0, 20.0], "b": [8.0, 22.0] },
-
-    { "type": "normal", "a": [16.0, 4.0], "b": [16.0, 10.0], "y0": 3.2, "y1": 6.4 },
-    { "type": "normal", "a": [16.0, 12.0], "b": [16.0, 14.0], "y0": 3.2, "y1": 6.4 },
-    { "type": "normal", "a": [16.0, 4.0], "b": [28.0, 4.0], "y0": 3.2, "y1": 6.4 },
-    { "type": "normal", "a": [28.0, 4.0], "b": [28.0, 14.0], "y0": 3.2, "y1": 6.4 },
-    { "type": "normal", "a": [28.0, 14.0], "b": [16.0, 14.0], "y0": 3.2, "y1": 6.4 },
-    { "type": "broken", "a": [16.0, 10.0], "b": [20.0, 10.0], "y0": 3.2, "y1": 6.4 },
-    { "type": "broken", "a": [16.0, 12.0], "b": [20.0, 12.0], "y0": 3.2, "y1": 6.4 }
+    {
+      "type": "normal",
+      "a": [
+        0,
+        0
+      ],
+      "b": [
+        16,
+        0
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "window",
+      "a": [
+        16,
+        0
+      ],
+      "b": [
+        16,
+        4
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        4
+      ],
+      "b": [
+        16,
+        6
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        6
+      ],
+      "b": [
+        16,
+        10
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        12
+      ],
+      "b": [
+        16,
+        14
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        14
+      ],
+      "b": [
+        16,
+        22
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        22
+      ],
+      "b": [
+        0,
+        22
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        0,
+        22
+      ],
+      "b": [
+        0,
+        0
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        8,
+        0
+      ],
+      "b": [
+        8,
+        2
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "door",
+      "a": [
+        8,
+        2
+      ],
+      "b": [
+        8,
+        4
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 2,
+      "door_offset": 0,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        8,
+        4
+      ],
+      "b": [
+        8,
+        6
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "door",
+      "a": [
+        0,
+        6
+      ],
+      "b": [
+        8,
+        6
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.6,
+      "door_offset": 3.2,
+      "door_height": 2.2
+    },
+    {
+      "type": "door",
+      "a": [
+        8,
+        6
+      ],
+      "b": [
+        16,
+        6
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.6,
+      "door_offset": 3.2,
+      "door_height": 2.2
+    },
+    {
+      "type": "door",
+      "a": [
+        0,
+        14
+      ],
+      "b": [
+        8,
+        14
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.6,
+      "door_offset": 3.2,
+      "door_height": 2.2
+    },
+    {
+      "type": "broken",
+      "a": [
+        8,
+        14
+      ],
+      "b": [
+        16,
+        14
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        8,
+        14
+      ],
+      "b": [
+        8,
+        18
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "window",
+      "a": [
+        8,
+        18
+      ],
+      "b": [
+        8,
+        20
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        8,
+        20
+      ],
+      "b": [
+        8,
+        22
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        4
+      ],
+      "b": [
+        16,
+        10
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        12
+      ],
+      "b": [
+        16,
+        14
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        4
+      ],
+      "b": [
+        28,
+        4
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        28,
+        4
+      ],
+      "b": [
+        28,
+        14
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        28,
+        14
+      ],
+      "b": [
+        16,
+        14
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        20,
+        10
+      ],
+      "b": [
+        16,
+        10
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "normal",
+      "a": [
+        16,
+        12
+      ],
+      "b": [
+        20,
+        12
+      ],
+      "y0": 0,
+      "y1": 3.2,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "broken",
+      "a": [
+        16,
+        10
+      ],
+      "b": [
+        20,
+        10
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    },
+    {
+      "type": "broken",
+      "a": [
+        16,
+        12
+      ],
+      "b": [
+        20,
+        12
+      ],
+      "y0": 3.2,
+      "y1": 6.4,
+      "thickness": 0.2,
+      "door_width": 1.2,
+      "door_offset": -1,
+      "door_height": 2.2
+    }
   ],
   "stairs": [
     {
-      "center_a": [16.0, 11.0],
-      "center_b": [20.0, 11.0],
-      "width": 2.0,
-      "from_y": 0.0,
+      "center_a": [
+        16,
+        11
+      ],
+      "center_b": [
+        20,
+        11
+      ],
+      "width": 2,
+      "from_y": 0,
       "to_y": 3.2,
       "steps": 8
     }
   ],
   "lights": [
-    { "pos": [4.0, 2.6, 3.0], "color": [2.4, 2.1, 1.7], "intensity": 1.0 },
-    { "pos": [12.0, 2.6, 3.0], "color": [1.8, 2.0, 2.3], "intensity": 1.0 },
-    { "pos": [8.0, 2.6, 10.0], "color": [2.6, 2.2, 1.6], "intensity": 1.0 },
-    { "pos": [4.0, 2.6, 18.0], "color": [2.2, 1.9, 1.5], "intensity": 1.0 },
-    { "pos": [12.0, 2.6, 18.0], "color": [2.0, 2.2, 1.7], "intensity": 1.0 },
-    { "pos": [22.0, 5.6, 9.0], "color": [2.4, 2.0, 1.5], "intensity": 1.0 }
+    {
+      "pos": [
+        4,
+        2.6,
+        3
+      ],
+      "color": [
+        2.4,
+        2.1,
+        1.7
+      ],
+      "intensity": 1
+    },
+    {
+      "pos": [
+        12,
+        2.6,
+        3
+      ],
+      "color": [
+        1.8,
+        2,
+        2.3
+      ],
+      "intensity": 1
+    },
+    {
+      "pos": [
+        8,
+        2.6,
+        10
+      ],
+      "color": [
+        2.6,
+        2.2,
+        1.6
+      ],
+      "intensity": 1
+    },
+    {
+      "pos": [
+        4,
+        2.6,
+        18
+      ],
+      "color": [
+        2.2,
+        1.9,
+        1.5
+      ],
+      "intensity": 1
+    },
+    {
+      "pos": [
+        12,
+        2.6,
+        18
+      ],
+      "color": [
+        2,
+        2.2,
+        1.7
+      ],
+      "intensity": 1
+    },
+    {
+      "pos": [
+        22,
+        5.6,
+        9
+      ],
+      "color": [
+        2.4,
+        2,
+        1.5
+      ],
+      "intensity": 1
+    }
   ]
 }

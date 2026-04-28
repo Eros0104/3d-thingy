@@ -186,7 +186,11 @@ int main(int argc, char** argv)
 
 	{
 		std::string audio_err;
-		if (!engine::audio_init(ENGINE_SOUNDS_DIR "/pistol_shot.mp3", audio_err)) {
+		if (!engine::audio_init(
+			ENGINE_SOUNDS_DIR "/pistol_shot.mp3",
+			ENGINE_SOUNDS_DIR "/footsteps.mp3",
+			audio_err
+		)) {
 			std::fprintf(stderr, "audio: %s (continuing without sound)\n", audio_err.c_str());
 		}
 	}
@@ -311,6 +315,8 @@ int main(int argc, char** argv)
 	int player_health = 100;
 	int bullets_in_clip = 8;
 	const int clip_size = 8;
+	bool is_reloading = false;
+	bool is_walking = false;
 
 	const bgfx::UniformHandle u_light_pos = bgfx::createUniform("u_lightPos", bgfx::UniformType::Vec4, k_max_shader_lights);
 	const bgfx::UniformHandle u_light_color = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4, k_max_shader_lights);
@@ -448,6 +454,18 @@ int main(int argc, char** argv)
 
 		engine::player_physics_step(camera, player_physics, dt, level, prev_eye_x, prev_eye_z);
 
+		// Footsteps follow actual post-physics horizontal movement so wall collisions
+		// (which zero out the move) silence the loop even while WASD is held.
+		{
+			const float move_dx = camera.eyeX - prev_eye_x;
+			const float move_dz = camera.eyeZ - prev_eye_z;
+			const float min_speed = 0.5f; // m/s
+			const float min_step = min_speed * dt;
+			const float moved_sq = move_dx * move_dx + move_dz * move_dz;
+			is_walking = moved_sq > (min_step * min_step);
+			engine::audio_set_walking(is_walking);
+		}
+
 		const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 		float view[16];
 		float proj[16];
@@ -459,25 +477,36 @@ int main(int argc, char** argv)
 		bgfx::setViewTransform(1, view, proj);
 		bgfx::touch(0);
 
-		if (shoot_pressed && bullets_in_clip > 0) {
+		const bool can_shoot = !is_reloading && bullets_in_clip > 0;
+		if (shoot_pressed && can_shoot) {
 			engine::play_pistol_shot();
 			--bullets_in_clip;
-		} else if (shoot_pressed) {
+		} else {
 			shoot_pressed = false;
 		}
 
-		if (reload_pressed) {
-			bullets_in_clip = clip_size;
+		const bool can_reload = !is_reloading && bullets_in_clip < clip_size;
+		if (reload_pressed && can_reload) {
+			is_reloading = true;
+		} else {
+			reload_pressed = false;
 		}
 
 		// Animation control: explicit input wins; otherwise loop Idle once one-shots end.
 		if (viewmodel.valid()) {
+			const engine::ViewmodelAnim cur = viewmodel.current_anim();
+			if (is_reloading
+				&& cur == engine::ViewmodelAnim::Reload
+				&& viewmodel.current_anim_finished()) {
+				bullets_in_clip = clip_size;
+				is_reloading = false;
+			}
+
 			if (shoot_pressed) {
 				viewmodel.play(engine::ViewmodelAnim::Shoot, false, true);
 			} else if (reload_pressed) {
 				viewmodel.play(engine::ViewmodelAnim::Reload, false, true);
 			} else {
-				const engine::ViewmodelAnim cur = viewmodel.current_anim();
 				const bool one_shot = cur == engine::ViewmodelAnim::Shoot
 					|| cur == engine::ViewmodelAnim::Reload
 					|| cur == engine::ViewmodelAnim::Take;
