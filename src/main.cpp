@@ -323,10 +323,13 @@ int main(int argc, char** argv)
 	engine::Viewmodel viewmodel;
 	{
 		std::string vm_err;
-		if (!viewmodel.load(ENGINE_MODELS_DIR "/animated_pistol.glb", vm_err)) {
+		if (!viewmodel.load(ENGINE_MODELS_DIR "/animated_pistol-v2.glb", vm_err)) {
 			std::fprintf(stderr, "viewmodel load: %s\n", vm_err.c_str());
 		} else {
+			// Prefer Take on first equip, but fall back to Idle (re-exported GLBs from
+			// Blender often ship with only the active action — Take is a no-op then).
 			viewmodel.play(engine::ViewmodelAnim::Take, false, true);
+			viewmodel.play(engine::ViewmodelAnim::Idle, true, false);
 		}
 	}
 
