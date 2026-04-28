@@ -110,6 +110,10 @@ bool hud_init(const HudInitDesc& desc, std::string& err)
 		return false;
 	}
 
+	// Reserve the bottom-right texel as a solid 1x1 white pixel so we can draw
+	// untextured filled rects through the same alpha-tinting fragment shader.
+	atlas[static_cast<size_t>(k_atlas_h - 1) * k_atlas_w + (k_atlas_w - 1)] = 255;
+
 	stbtt_fontinfo info;
 	if (!stbtt_InitFont(&info, font_data.data(), 0)) {
 		err = "hud: stbtt_InitFont failed";
@@ -326,6 +330,50 @@ float hud_draw_text_right(const char* text, float right_x, float pen_y, uint32_t
 {
 	const float width = hud_text_width(text);
 	return hud_draw_text(text, right_x - width, pen_y, abgr);
+}
+
+void hud_draw_solid_rect(float x, float y, float w, float h, uint32_t abgr)
+{
+	if (!g_initialized || !bgfx::isValid(g_program) || !bgfx::isValid(g_atlas_tex)) {
+		return;
+	}
+	if (w <= 0.0f || h <= 0.0f) {
+		return;
+	}
+
+	if (bgfx::getAvailTransientVertexBuffer(4, g_layout) < 4
+	    || bgfx::getAvailTransientIndexBuffer(6) < 6) {
+		return;
+	}
+
+	bgfx::TransientVertexBuffer tvb;
+	bgfx::TransientIndexBuffer tib;
+	bgfx::allocTransientVertexBuffer(&tvb, 4, g_layout);
+	bgfx::allocTransientIndexBuffer(&tib, 6);
+
+	// UV at the center of the reserved bottom-right texel (always alpha=255).
+	const float u = 1.0f - 0.5f / static_cast<float>(k_atlas_w);
+	const float v = 1.0f - 0.5f / static_cast<float>(k_atlas_h);
+
+	HudVertex* verts = reinterpret_cast<HudVertex*>(tvb.data);
+	verts[0] = {x,         y,         0.0f, u, v, abgr};
+	verts[1] = {x + w,     y,         0.0f, u, v, abgr};
+	verts[2] = {x + w,     y + h,     0.0f, u, v, abgr};
+	verts[3] = {x,         y + h,     0.0f, u, v, abgr};
+
+	uint16_t* idx = reinterpret_cast<uint16_t*>(tib.data);
+	idx[0] = 0; idx[1] = 1; idx[2] = 2;
+	idx[3] = 0; idx[4] = 2; idx[5] = 3;
+
+	const uint64_t state = BGFX_STATE_WRITE_RGB
+		| BGFX_STATE_WRITE_A
+		| BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+
+	bgfx::setState(state);
+	bgfx::setTexture(0, g_s_albedo, g_atlas_tex);
+	bgfx::setVertexBuffer(0, &tvb);
+	bgfx::setIndexBuffer(&tib);
+	bgfx::submit(g_view, g_program);
 }
 
 } // namespace engine

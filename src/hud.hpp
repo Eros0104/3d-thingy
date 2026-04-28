@@ -27,6 +27,9 @@ float hud_draw_text(const char* text, float pen_x, float pen_y, uint32_t abgr);
 // Same as above but draws so the right edge of the text aligns to right_x.
 float hud_draw_text_right(const char* text, float right_x, float pen_y, uint32_t abgr);
 
+// Solid filled rectangle in pixel space, useful for crosshairs and bars.
+void hud_draw_solid_rect(float x, float y, float w, float h, uint32_t abgr);
+
 float hud_text_width(const char* text);
 float hud_line_height();
 float hud_ascent();

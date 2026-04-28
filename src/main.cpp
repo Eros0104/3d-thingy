@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,139 @@ void window_pixel_size(SDL_Window* window, int* out_w, int* out_h)
 static constexpr float k_light_bulb_radius = 0.14f;
 static constexpr uint32_t k_light_bulb_abgr = 0xffffffffu;
 static constexpr int k_max_shader_lights = 8;
+
+struct Target {
+	float pos_x;
+	float pos_y;       // center y
+	float pos_z;
+	float half_extent; // cube half-side
+	int hits_remaining;
+	bool alive;
+};
+
+constexpr int k_target_max_hits = 3;
+
+static void build_unit_cube(
+	std::vector<LitVertex>& vertices,
+	std::vector<uint16_t>& indices,
+	float half_extent,
+	uint32_t abgr
+)
+{
+	vertices.clear();
+	indices.clear();
+
+	const float h = half_extent;
+	struct Face {
+		float nx, ny, nz;
+		float cx, cy, cz;  // center offset along normal
+		float ux, uy, uz;  // tangent (full extent direction 1)
+		float vx, vy, vz;  // tangent (full extent direction 2)
+	};
+	const Face faces[6] = {
+		{ 1, 0, 0,  h, 0, 0,  0, 0,-1,  0, 1, 0}, // +X (right)
+		{-1, 0, 0, -h, 0, 0,  0, 0, 1,  0, 1, 0}, // -X (left)
+		{ 0, 1, 0,  0, h, 0,  1, 0, 0,  0, 0, 1}, // +Y (top)
+		{ 0,-1, 0,  0,-h, 0,  1, 0, 0,  0, 0,-1}, // -Y (bottom)
+		{ 0, 0, 1,  0, 0, h,  1, 0, 0,  0, 1, 0}, // +Z (front)
+		{ 0, 0,-1,  0, 0,-h, -1, 0, 0,  0, 1, 0}, // -Z (back)
+	};
+	for (int f = 0; f < 6; ++f) {
+		const Face& fc = faces[f];
+		const uint16_t base = static_cast<uint16_t>(vertices.size());
+		for (int j = 0; j < 4; ++j) {
+			const float su = (j == 1 || j == 2) ? h : -h;
+			const float sv = (j >= 2) ? h : -h;
+			LitVertex v;
+			v.x = fc.cx + fc.ux * su + fc.vx * sv;
+			v.y = fc.cy + fc.uy * su + fc.vy * sv;
+			v.z = fc.cz + fc.uz * su + fc.vz * sv;
+			v.nx = fc.nx;
+			v.ny = fc.ny;
+			v.nz = fc.nz;
+			v.u = (j == 1 || j == 2) ? 1.0f : 0.0f;
+			v.v = (j >= 2) ? 1.0f : 0.0f;
+			v.abgr = abgr;
+			vertices.push_back(v);
+		}
+		indices.push_back(base + 0);
+		indices.push_back(base + 1);
+		indices.push_back(base + 2);
+		indices.push_back(base + 0);
+		indices.push_back(base + 2);
+		indices.push_back(base + 3);
+	}
+}
+
+// Slab-method ray vs axis-aligned box. Returns true and the entry distance
+// (front-face hit) when the ray intersects in front of the origin.
+static bool ray_aabb(
+	float ox, float oy, float oz,
+	float dx, float dy, float dz,
+	float minx, float miny, float minz,
+	float maxx, float maxy, float maxz,
+	float& t_hit
+)
+{
+	const float inv_dx = (std::fabs(dx) > 1e-8f) ? 1.0f / dx : std::numeric_limits<float>::infinity();
+	const float inv_dy = (std::fabs(dy) > 1e-8f) ? 1.0f / dy : std::numeric_limits<float>::infinity();
+	const float inv_dz = (std::fabs(dz) > 1e-8f) ? 1.0f / dz : std::numeric_limits<float>::infinity();
+
+	const float t1 = (minx - ox) * inv_dx;
+	const float t2 = (maxx - ox) * inv_dx;
+	const float t3 = (miny - oy) * inv_dy;
+	const float t4 = (maxy - oy) * inv_dy;
+	const float t5 = (minz - oz) * inv_dz;
+	const float t6 = (maxz - oz) * inv_dz;
+
+	const float t_near = std::max({std::min(t1, t2), std::min(t3, t4), std::min(t5, t6)});
+	const float t_far  = std::min({std::max(t1, t2), std::max(t3, t4), std::max(t5, t6)});
+
+	if (t_far < 0.0f || t_near > t_far) {
+		return false;
+	}
+	t_hit = t_near >= 0.0f ? t_near : t_far;
+	return t_hit >= 0.0f;
+}
+
+// Treats every wall as an opaque vertical quad on the XZ-plane segment a→b
+// between y0..y1. Returns the smallest positive t in front of the ray.
+static bool ray_walls_nearest(
+	const engine::Level& level,
+	float ox, float oy, float oz,
+	float dx, float dy, float dz,
+	float& t_hit
+)
+{
+	bool any = false;
+	float best_t = std::numeric_limits<float>::infinity();
+	for (const engine::Wall& w : level.walls) {
+		const float bxx = w.b.x - w.a.x;
+		const float bzz = w.b.z - w.a.z;
+		const float det = dx * bzz - dz * bxx;
+		if (std::fabs(det) < 1e-7f) {
+			continue; // ray parallel to wall
+		}
+		const float ax_ox = w.a.x - ox;
+		const float az_oz = w.a.z - oz;
+		// Parameter s along wall (0..1), parameter t along ray (>= 0).
+		const float s = (-dz * (-ax_ox) + dx * (-az_oz)) / det;
+		const float t = (bxx * (-az_oz) - bzz * (-ax_ox)) / det;
+		if (t <= 0.0f || s < 0.0f || s > 1.0f) {
+			continue;
+		}
+		const float y_at = oy + dy * t;
+		if (y_at < w.y0 || y_at > w.y1) {
+			continue;
+		}
+		if (t < best_t) {
+			best_t = t;
+			any = true;
+		}
+	}
+	t_hit = best_t;
+	return any;
+}
 
 static void build_uv_sphere(
 	std::vector<LitVertex>& vertices,
@@ -362,6 +496,40 @@ int main(int argc, char** argv)
 	const bgfx::VertexBufferHandle bulb_vbh = bgfx::createVertexBuffer(bulb_vb_mem, layout);
 	const bgfx::IndexBufferHandle bulb_ibh = bgfx::createIndexBuffer(bulb_ib_mem);
 
+	// Three target cubes at three damage tints. We swap which VBH is bound based
+	// on hits_remaining so each shot visibly darkens the cube before it disappears.
+	constexpr float k_target_half_extent = 0.4f;
+	constexpr uint32_t k_target_tints[k_target_max_hits] = {
+		0xff5050ffu,  // bright red (full health)
+		0xff3030c0u,  // mid red    (1 hit)
+		0xff1a1a80u,  // dark red   (2 hits, next shot kills)
+	};
+	std::vector<LitVertex> cube_verts;
+	std::vector<uint16_t> cube_indices;
+	bgfx::VertexBufferHandle cube_vbh[k_target_max_hits];
+	bgfx::IndexBufferHandle cube_ibh = BGFX_INVALID_HANDLE;
+	for (int t = 0; t < k_target_max_hits; ++t) {
+		build_unit_cube(cube_verts, cube_indices, k_target_half_extent, k_target_tints[t]);
+		const bgfx::Memory* vb_mem = bgfx::copy(
+			cube_verts.data(),
+			static_cast<uint32_t>(cube_verts.size() * sizeof(LitVertex))
+		);
+		cube_vbh[t] = bgfx::createVertexBuffer(vb_mem, layout);
+		if (t == 0) {
+			const bgfx::Memory* ib_mem = bgfx::copy(
+				cube_indices.data(),
+				static_cast<uint32_t>(cube_indices.size() * sizeof(uint16_t))
+			);
+			cube_ibh = bgfx::createIndexBuffer(ib_mem);
+		}
+	}
+
+	std::vector<Target> targets = {
+		{3.0f, k_target_half_extent, 5.0f, k_target_half_extent, k_target_max_hits, true},
+		{4.0f, k_target_half_extent, 5.5f, k_target_half_extent, k_target_max_hits, true},
+		{5.0f, k_target_half_extent, 5.0f, k_target_half_extent, k_target_max_hits, true},
+	};
+
 	engine::Registry registry;
 	engine::ecs_bootstrap(registry);
 	(void)registry;
@@ -481,6 +649,42 @@ int main(int argc, char** argv)
 		if (shoot_pressed && can_shoot) {
 			engine::play_pistol_shot();
 			--bullets_in_clip;
+
+			// Build the shot ray from the camera (eye) along its forward direction.
+			const float fx = std::cos(camera.pitch) * std::sin(camera.yaw);
+			const float fy = std::sin(camera.pitch);
+			const float fz = std::cos(camera.pitch) * std::cos(camera.yaw);
+
+			float wall_t = std::numeric_limits<float>::infinity();
+			ray_walls_nearest(level, camera.eyeX, camera.eyeY, camera.eyeZ, fx, fy, fz, wall_t);
+
+			int best_target = -1;
+			float best_t = wall_t;
+			for (size_t i = 0; i < targets.size(); ++i) {
+				const Target& tgt = targets[i];
+				if (!tgt.alive) {
+					continue;
+				}
+				const float h = tgt.half_extent;
+				float t_hit;
+				const bool hit = ray_aabb(
+					camera.eyeX, camera.eyeY, camera.eyeZ,
+					fx, fy, fz,
+					tgt.pos_x - h, tgt.pos_y - h, tgt.pos_z - h,
+					tgt.pos_x + h, tgt.pos_y + h, tgt.pos_z + h,
+					t_hit
+				);
+				if (hit && t_hit < best_t) {
+					best_t = t_hit;
+					best_target = static_cast<int>(i);
+				}
+			}
+			if (best_target >= 0) {
+				Target& tgt = targets[static_cast<size_t>(best_target)];
+				if (--tgt.hits_remaining <= 0) {
+					tgt.alive = false;
+				}
+			}
 		} else {
 			shoot_pressed = false;
 		}
@@ -597,6 +801,22 @@ int main(int argc, char** argv)
 			}
 		}
 
+		// Targets — bind a different VBH per damage state so the cube visibly darkens.
+		for (const Target& tgt : targets) {
+			if (!tgt.alive) {
+				continue;
+			}
+			const int tint = k_target_max_hits - tgt.hits_remaining;
+			const int tint_idx = std::clamp(tint, 0, k_target_max_hits - 1);
+			bgfx::setState(renderState);
+			bx::mtxTranslate(model, tgt.pos_x, tgt.pos_y, tgt.pos_z);
+			bgfx::setTransform(model);
+			bgfx::setTexture(0, s_albedo, white_tex);
+			bgfx::setVertexBuffer(0, cube_vbh[tint_idx]);
+			bgfx::setIndexBuffer(cube_ibh);
+			bgfx::submit(0, program);
+		}
+
 		if (viewmodel.valid() && bgfx::isValid(skinned_program)) {
 			engine::ViewmodelDrawParams vmp{};
 			vmp.eye[0] = camera.eyeX;
@@ -650,6 +870,13 @@ int main(int argc, char** argv)
 				baseline_y,
 				k_hud_red
 			);
+
+			// Minimal white crosshair: a 3px square dot at the screen center.
+			constexpr uint32_t k_crosshair_white = 0xffffffffu;
+			const float dot_size = 3.0f;
+			const float cx = (static_cast<float>(width)  - dot_size) * 0.5f;
+			const float cy = (static_cast<float>(height) - dot_size) * 0.5f;
+			engine::hud_draw_solid_rect(cx, cy, dot_size, dot_size, k_crosshair_white);
 		}
 
 		bgfx::frame();
@@ -680,6 +907,10 @@ int main(int argc, char** argv)
 	if (bgfx::isValid(debug_program)) bgfx::destroy(debug_program);
 	if (bgfx::isValid(skinned_program)) bgfx::destroy(skinned_program);
 	bgfx::destroy(program);
+	if (bgfx::isValid(cube_ibh)) bgfx::destroy(cube_ibh);
+	for (int t = 0; t < k_target_max_hits; ++t) {
+		if (bgfx::isValid(cube_vbh[t])) bgfx::destroy(cube_vbh[t]);
+	}
 	bgfx::destroy(bulb_ibh);
 	bgfx::destroy(bulb_vbh);
 	if (bgfx::isValid(stair_vbh)) bgfx::destroy(stair_vbh);
