@@ -97,6 +97,7 @@ add_executable(fps_engine
   src/shader_program.cpp
   src/texture_loader.cpp
   src/viewmodel.cpp
+  src/window.cpp
   src/hud.cpp
   src/ecs.cpp
   shaders/vs_triangle.sc
