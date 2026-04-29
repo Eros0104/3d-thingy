@@ -14,14 +14,16 @@ bool Window::create(const char *title, int w, int h) {
 
 bool Window::is_running() { return window != nullptr; }
 
+void Window::quit() { destroy(); }
+
 SDL_Window *Window::get() { return window; }
 
 void Window::destroy() {
-  if (!is_running())
+  if (window == nullptr)
     return;
 
   SDL_DestroyWindow(window);
-  SDL_Quit();
+  window = nullptr;
 }
 
 Window::~Window() { destroy(); }

@@ -67,13 +67,6 @@ add_subdirectory("${bgfx_cmake_SOURCE_DIR}" "${bgfx_cmake_BINARY_DIR}")
 include("${bgfx_cmake_SOURCE_DIR}/cmake/bgfxToolUtils.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/engine_shaders.cmake")
 
-FetchContent_Declare(
-  EnTT
-  GIT_REPOSITORY https://github.com/skypjack/entt.git
-  GIT_TAG v3.13.2
-)
-FetchContent_MakeAvailable(EnTT)
-
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
 FetchContent_Declare(
@@ -87,10 +80,14 @@ set(SHADER_GEN_DIR "${CMAKE_BINARY_DIR}/generated/shaders")
 
 add_executable(fps_engine
   src/main.cpp
+  src/application/application.cpp
   src/audio.cpp
   src/fps_camera.cpp
+  src/geometry/primitives.cpp
+  src/physics/raycast.cpp
   src/physics_world.cpp
   src/level_data.cpp
+  src/level_loader.cpp
   src/json_level.cpp
   src/level_mesh.cpp
   src/level_binary.cpp
@@ -99,7 +96,6 @@ add_executable(fps_engine
   src/viewmodel.cpp
   src/window.cpp
   src/hud.cpp
-  src/ecs.cpp
   shaders/vs_triangle.sc
   shaders/fs_triangle.sc
   shaders/vs_skinned.sc
@@ -132,7 +128,6 @@ target_link_libraries(fps_engine PRIVATE
   bx
   bimg
   bimg_decode
-  EnTT::EnTT
   nlohmann_json::nlohmann_json
 )
 
