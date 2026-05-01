@@ -1,5 +1,5 @@
-#include "json_level.hpp"
-#include "level_binary.hpp"
+#include "game/level/json_level.hpp"
+#include "game/level/level_binary.hpp"
 
 #include <cstdio>
 #include <string>

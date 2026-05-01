@@ -79,23 +79,24 @@ FetchContent_MakeAvailable(nlohmann_json)
 set(SHADER_GEN_DIR "${CMAKE_BINARY_DIR}/generated/shaders")
 
 add_executable(fps_engine
-  src/main.cpp
-  src/application/application.cpp
-  src/audio.cpp
-  src/fps_camera.cpp
-  src/geometry/primitives.cpp
-  src/physics/raycast.cpp
-  src/physics_world.cpp
-  src/level_data.cpp
-  src/level_loader.cpp
-  src/json_level.cpp
-  src/level_mesh.cpp
-  src/level_binary.cpp
-  src/shader_program.cpp
-  src/texture_loader.cpp
-  src/viewmodel.cpp
-  src/window.cpp
-  src/hud.cpp
+  src/game/main.cpp
+  src/engine/application/application.cpp
+  src/engine/renderer/renderer.cpp
+  src/engine/audio.cpp
+  src/game/fps_camera.cpp
+  src/engine/geometry/primitives.cpp
+  src/engine/physics/raycast.cpp
+  src/game/physics_world.cpp
+  src/game/level/level_data.cpp
+  src/game/level/level_loader.cpp
+  src/game/level/json_level.cpp
+  src/game/level/level_mesh.cpp
+  src/game/level/level_binary.cpp
+  src/engine/shader_program.cpp
+  src/engine/texture_loader.cpp
+  src/game/viewmodel.cpp
+  src/engine/window.cpp
+  src/engine/hud.cpp
   shaders/vs_triangle.sc
   shaders/fs_triangle.sc
   shaders/vs_skinned.sc
@@ -107,11 +108,11 @@ add_executable(fps_engine
 )
 
 target_compile_definitions(fps_engine PRIVATE
-  "ENGINE_TEXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/textures\""
-  "ENGINE_MAPS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/maps\""
-  "ENGINE_MODELS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/models\""
-  "ENGINE_SOUNDS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/sounds\""
-  "ENGINE_FONTS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fonts\""
+  "ENGINE_TEXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets/textures\""
+  "ENGINE_MAPS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets/maps\""
+  "ENGINE_MODELS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets/models\""
+  "ENGINE_SOUNDS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds\""
+  "ENGINE_FONTS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts\""
 )
 
 target_include_directories(fps_engine PRIVATE
@@ -133,9 +134,9 @@ target_link_libraries(fps_engine PRIVATE
 
 add_executable(level_pack
   src/tools/level_pack.cpp
-  src/level_data.cpp
-  src/json_level.cpp
-  src/level_binary.cpp
+  src/game/level/level_data.cpp
+  src/game/level/json_level.cpp
+  src/game/level/level_binary.cpp
 )
 
 target_include_directories(level_pack PRIVATE
