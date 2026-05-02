@@ -15,6 +15,16 @@ enum class ViewmodelAnim : int {
 	Count = 4,
 };
 
+enum class ZombieAnim : int {
+	Idle = 0,
+	Walk = 1,
+	Run = 2,
+	Attack = 3,
+	Death = 4,
+	GetHit = 5,
+	Count = 6,
+};
+
 struct ViewmodelDrawParams {
 	float eye[3];
 	float yaw;
@@ -27,6 +37,12 @@ struct ViewmodelDrawParams {
 	float tweak_yaw;
 	float tweak_roll;
 	float scale;
+};
+
+struct CharacterDrawParams {
+	float pos[3];   // world-space position
+	float yaw;      // facing direction (radians, around Y axis)
+	float scale;    // uniform scale
 };
 
 class Viewmodel {
@@ -42,6 +58,7 @@ public:
 	bool valid() const;
 
 	void play(ViewmodelAnim anim, bool loop, bool restart_if_same);
+	void play(ZombieAnim anim, bool loop, bool restart_if_same);
 	bool current_anim_finished() const;
 	ViewmodelAnim current_anim() const;
 
@@ -56,6 +73,17 @@ public:
 		bgfx::TextureHandle fallback_white,
 		uint64_t state,
 		const ViewmodelDrawParams& params
+	);
+
+	void submit_world(
+		bgfx::ViewId view_id,
+		bgfx::ProgramHandle program,
+		bgfx::UniformHandle u_bones,
+		bgfx::UniformHandle s_albedo,
+		bgfx::UniformHandle u_baseColor,
+		bgfx::TextureHandle fallback_white,
+		uint64_t state,
+		const CharacterDrawParams& params
 	);
 
 	/// Submits a 3-line axis gizmo at the model anchor: red = X (pitch axis),

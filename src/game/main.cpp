@@ -284,6 +284,16 @@ int main(int argc, char **argv) {
     }
   }
 
+  engine::Viewmodel zombie;
+  {
+    std::string zm_err;
+    if (!zombie.load(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", zm_err)) {
+      std::fprintf(stderr, "zombie load: %s\n", zm_err.c_str());
+    } else {
+      zombie.play(engine::ZombieAnim::Idle, true, true);
+    }
+  }
+
   FpsCamera camera;
   camera.eyeX = level.spawn.pos.x;
   camera.eyeY = level.spawn.pos.y + engine::PlayerPhysics::k_eye_height + 0.02f;
@@ -461,6 +471,10 @@ int main(int argc, char **argv) {
       viewmodel.update(dt);
     }
 
+    if (zombie.valid()) {
+      zombie.update(dt);
+    }
+
     bgfx::dbgTextClear();
     bgfx::dbgTextPrintf(
         0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   LMB:Shoot R:Reload",
@@ -590,6 +604,17 @@ int main(int argc, char **argv) {
       }
     }
 
+    if (zombie.valid() && bgfx::isValid(skinned_program)) {
+      engine::CharacterDrawParams zdp{};
+      zdp.pos[0] = 4.0f;
+      zdp.pos[1] = 0.0f;
+      zdp.pos[2] = 7.0f;
+      zdp.yaw = bx::kPi; // face toward player spawn
+      zdp.scale = 1.0f;
+      zombie.submit_world(0, skinned_program, u_bones, s_albedo, u_baseColor,
+                          white_tex, renderState, zdp);
+    }
+
     if (hud_ok) {
       constexpr bgfx::ViewId k_hud_view = 2;
       engine::hud_begin_frame(k_hud_view, width, height);
@@ -631,6 +656,7 @@ int main(int argc, char **argv) {
 
   engine::audio_shutdown();
   engine::hud_shutdown();
+  zombie.unload();
   viewmodel.unload();
   if (bgfx::isValid(floor_tex)) {
     bgfx::destroy(floor_tex);

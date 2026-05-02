@@ -195,8 +195,13 @@ bgfx::TextureHandle decode_texture_from_memory(const uint8_t* data, size_t size,
 	bx::DefaultAllocator alloc;
 	bimg::ImageContainer* img = bimg::imageParse(&alloc, data, static_cast<uint32_t>(size));
 	if (!img) {
+		std::fprintf(stderr, "  tex: bimg::imageParse failed (size=%zu, magic=0x%02x%02x%02x%02x)\n",
+			size, data[0], data[1], data[2], data[3]);
 		return BGFX_INVALID_HANDLE;
 	}
+	std::fprintf(stderr, "  tex: bimg %dx%d fmt=%d mips=%d layers=%d\n",
+		img->m_width, img->m_height, static_cast<int>(img->m_format),
+		static_cast<int>(img->m_numMips), static_cast<int>(img->m_numLayers));
 	if (img->m_cubeMap || img->m_depth > 1) {
 		bimg::imageFree(img);
 		return BGFX_INVALID_HANDLE;
@@ -211,6 +216,7 @@ bgfx::TextureHandle decode_texture_from_memory(const uint8_t* data, size_t size,
 		flags,
 		mem
 	);
+	std::fprintf(stderr, "  tex: createTexture2D -> handle=%d\n", h.idx);
 	bimg::imageFree(img);
 	return h;
 }
@@ -234,6 +240,27 @@ ViewmodelAnim classify_anim_name(const char* name)
 	return ViewmodelAnim::Count;
 }
 
+ZombieAnim classify_zombie_anim_name(const char* name)
+{
+	if (!name) return ZombieAnim::Count;
+	std::string s = name;
+	auto contains = [&](const char* needle) {
+		std::string n = needle;
+		auto it = std::search(
+			s.begin(), s.end(), n.begin(), n.end(),
+			[](char a, char b) { return std::tolower(a) == std::tolower(b); }
+		);
+		return it != s.end();
+	};
+	if (contains("idle"))   return ZombieAnim::Idle;
+	if (contains("walk"))   return ZombieAnim::Walk;
+	if (contains("run"))    return ZombieAnim::Run;
+	if (contains("attack")) return ZombieAnim::Attack;
+	if (contains("death"))  return ZombieAnim::Death;
+	if (contains("hit"))    return ZombieAnim::GetHit;
+	return ZombieAnim::Count;
+}
+
 } // namespace
 
 struct Viewmodel::State {
@@ -246,8 +273,9 @@ struct Viewmodel::State {
 	std::vector<bgfx::TextureHandle> owned_textures;
 	std::vector<Animation> animations;
 	int anim_lookup[static_cast<int>(ViewmodelAnim::Count)] = {-1, -1, -1, -1};
+	int zombie_anim_lookup[static_cast<int>(ZombieAnim::Count)] = {-1, -1, -1, -1, -1, -1};
 
-	int current = static_cast<int>(ViewmodelAnim::Idle);
+	int current = -1; // raw index into animations[], -1 = none
 	float time = 0.0f;
 	bool looping = true;
 	bool finished = false;
@@ -297,23 +325,47 @@ void Viewmodel::unload()
 	s_->traversal.clear();
 	s_->animations.clear();
 	for (int i = 0; i < static_cast<int>(ViewmodelAnim::Count); ++i) s_->anim_lookup[i] = -1;
+	for (int i = 0; i < static_cast<int>(ZombieAnim::Count); ++i) s_->zombie_anim_lookup[i] = -1;
+	s_->current = -1;
 	s_->loaded = false;
 }
 
 bool Viewmodel::valid() const { return s_->loaded; }
-ViewmodelAnim Viewmodel::current_anim() const { return static_cast<ViewmodelAnim>(s_->current); }
+ViewmodelAnim Viewmodel::current_anim() const {
+	for (int i = 0; i < static_cast<int>(ViewmodelAnim::Count); ++i) {
+		if (s_->anim_lookup[i] == s_->current) return static_cast<ViewmodelAnim>(i);
+	}
+	return ViewmodelAnim::Idle;
+}
 bool Viewmodel::current_anim_finished() const { return s_->finished; }
 
 void Viewmodel::play(ViewmodelAnim anim, bool loop, bool restart_if_same)
 {
-	int idx = static_cast<int>(anim);
-	if (idx < 0 || idx >= static_cast<int>(ViewmodelAnim::Count)) return;
-	if (s_->anim_lookup[idx] < 0) return;
-	if (idx == s_->current && !restart_if_same) {
+	int slot = static_cast<int>(anim);
+	if (slot < 0 || slot >= static_cast<int>(ViewmodelAnim::Count)) return;
+	int raw = s_->anim_lookup[slot];
+	if (raw < 0) return;
+	if (raw == s_->current && !restart_if_same) {
 		s_->looping = loop;
 		return;
 	}
-	s_->current = idx;
+	s_->current = raw;
+	s_->time = 0.0f;
+	s_->looping = loop;
+	s_->finished = false;
+}
+
+void Viewmodel::play(ZombieAnim anim, bool loop, bool restart_if_same)
+{
+	int slot = static_cast<int>(anim);
+	if (slot < 0 || slot >= static_cast<int>(ZombieAnim::Count)) return;
+	int raw = s_->zombie_anim_lookup[slot];
+	if (raw < 0) return;
+	if (raw == s_->current && !restart_if_same) {
+		s_->looping = loop;
+		return;
+	}
+	s_->current = raw;
 	s_->time = 0.0f;
 	s_->looping = loop;
 	s_->finished = false;
@@ -468,10 +520,19 @@ bool Viewmodel::load(const char* glb_path, std::string& err)
 	// Cache decoded textures by image index. The State owns each handle exactly once.
 	std::unordered_map<size_t, bgfx::TextureHandle> image_cache;
 	auto get_image_texture = [&](const cgltf_image* img) -> bgfx::TextureHandle {
-		if (!img || !img->buffer_view) return BGFX_INVALID_HANDLE;
+		if (!img) return BGFX_INVALID_HANDLE;
 		size_t idx = static_cast<size_t>(img - data->images);
 		auto it = image_cache.find(idx);
 		if (it != image_cache.end()) return it->second;
+		std::fprintf(stderr, "  img[%zu]: mime=%s bv=%s uri=%s\n",
+			idx,
+			img->mime_type ? img->mime_type : "(none)",
+			img->buffer_view ? "yes" : "null",
+			img->uri ? img->uri : "(none)");
+		if (!img->buffer_view) {
+			image_cache[idx] = BGFX_INVALID_HANDLE;
+			return BGFX_INVALID_HANDLE;
+		}
 		const cgltf_buffer_view* bv = img->buffer_view;
 		const uint8_t* base = static_cast<const uint8_t*>(bv->buffer->data) + bv->offset;
 		bgfx::TextureHandle h = decode_texture_from_memory(base, bv->size, 0);
@@ -678,6 +739,11 @@ bool Viewmodel::load(const char* glb_path, std::string& err)
 		if (slot != ViewmodelAnim::Count) {
 			s_->anim_lookup[static_cast<int>(slot)] = static_cast<int>(ai);
 		}
+		ZombieAnim zslot = classify_zombie_anim_name(a.name.c_str());
+		if (zslot != ZombieAnim::Count) {
+			int& entry = s_->zombie_anim_lookup[static_cast<int>(zslot)];
+			if (entry < 0) entry = static_cast<int>(ai); // first match wins
+		}
 	}
 
 	cgltf_free(data);
@@ -685,9 +751,11 @@ bool Viewmodel::load(const char* glb_path, std::string& err)
 	// Initial pose: rest TRS, no animation, world matrices computed once.
 	for (auto& n : s_->nodes) n.current = n.rest;
 
-	std::printf("viewmodel loaded: nodes=%zu joints=%zu primitives=%zu anims=%zu (idle=%d shoot=%d reload=%d take=%d)\n",
+	std::printf("viewmodel loaded: nodes=%zu joints=%zu primitives=%zu anims=%zu (idle=%d shoot=%d reload=%d take=%d) (z_idle=%d z_walk=%d z_run=%d z_attack=%d z_death=%d z_hit=%d)\n",
 		s_->nodes.size(), s_->joint_nodes.size(), s_->primitives.size(), s_->animations.size(),
-		s_->anim_lookup[0], s_->anim_lookup[1], s_->anim_lookup[2], s_->anim_lookup[3]);
+		s_->anim_lookup[0], s_->anim_lookup[1], s_->anim_lookup[2], s_->anim_lookup[3],
+		s_->zombie_anim_lookup[0], s_->zombie_anim_lookup[1], s_->zombie_anim_lookup[2],
+		s_->zombie_anim_lookup[3], s_->zombie_anim_lookup[4], s_->zombie_anim_lookup[5]);
 
 	s_->loaded = true;
 	return true;
@@ -700,10 +768,9 @@ void Viewmodel::update(float dt)
 	// Reset to rest pose, then apply current animation.
 	for (auto& n : s_->nodes) n.current = n.rest;
 
-	if (s_->current >= 0 && s_->current < static_cast<int>(ViewmodelAnim::Count)) {
-		int ai = s_->anim_lookup[s_->current];
-		if (ai >= 0) {
-			const Animation& a = s_->animations[ai];
+	if (s_->current >= 0 && s_->current < static_cast<int>(s_->animations.size())) {
+		{
+			const Animation& a = s_->animations[s_->current];
 			s_->time += dt;
 			if (a.duration > 0.0f) {
 				if (s_->looping) {
@@ -835,6 +902,44 @@ void Viewmodel::submit(
 	model[12] += params.eye[0];
 	model[13] += params.eye[1];
 	model[14] += params.eye[2];
+
+	for (const Primitive& p : s_->primitives) {
+		if (!bgfx::isValid(p.vb)) continue;
+		bgfx::setState(state);
+		bgfx::setTransform(model);
+		bgfx::setUniform(u_bones, s_->bone_matrices.data(), k_max_bones);
+		bgfx::setUniform(u_baseColor, p.base_color);
+		bgfx::TextureHandle tex = bgfx::isValid(p.texture) ? p.texture : fallback_white;
+		bgfx::setTexture(0, s_albedo, tex);
+		bgfx::setVertexBuffer(0, p.vb);
+		if (bgfx::isValid(p.ib)) bgfx::setIndexBuffer(p.ib);
+		bgfx::submit(view_id, program);
+	}
+}
+
+void Viewmodel::submit_world(
+	bgfx::ViewId view_id,
+	bgfx::ProgramHandle program,
+	bgfx::UniformHandle u_bones,
+	bgfx::UniformHandle s_albedo,
+	bgfx::UniformHandle u_baseColor,
+	bgfx::TextureHandle fallback_white,
+	uint64_t state,
+	const CharacterDrawParams& params
+)
+{
+	if (!s_->loaded) return;
+
+	// model = T_world * R_y(yaw) * S_scale
+	float scl[16], rot[16], model[16];
+	bx::mtxScale(scl, params.scale, params.scale, params.scale);
+	bx::mtxRotateY(rot, params.yaw);
+	float rs[16];
+	mat_mul(rs, rot, scl);           // R * S
+	bx::mtxTranslate(model, params.pos[0], params.pos[1], params.pos[2]);
+	float tmp[16];
+	std::memcpy(tmp, model, sizeof(tmp));
+	mat_mul(model, tmp, rs);         // T * (R * S)
 
 	for (const Primitive& p : s_->primitives) {
 		if (!bgfx::isValid(p.vb)) continue;
