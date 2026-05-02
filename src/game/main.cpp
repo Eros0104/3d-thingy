@@ -15,6 +15,7 @@
 #include "engine/shader_program.hpp"
 #include "engine/texture_loader.hpp"
 #include "game/viewmodel.hpp"
+#include "game/character.hpp"
 
 #include <SDL.h>
 
@@ -284,13 +285,18 @@ int main(int argc, char **argv) {
     }
   }
 
-  engine::Viewmodel zombie;
+  engine::Character zombie_char;
+  zombie_char.x = 4.0f;
+  zombie_char.y = 0.0f;
+  zombie_char.z = 7.0f;
+  zombie_char.hp = 100;
+  bool zombie_dying = false;
   {
     std::string zm_err;
-    if (!zombie.load(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", zm_err)) {
+    if (!zombie_char.model.load(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", zm_err)) {
       std::fprintf(stderr, "zombie load: %s\n", zm_err.c_str());
     } else {
-      zombie.play(engine::ZombieAnim::Idle, true, true);
+      zombie_char.model.play(engine::ZombieAnim::Idle, true, true);
     }
   }
 
@@ -411,28 +417,37 @@ int main(int argc, char **argv) {
       engine::ray_walls_nearest(level.walls, camera.eyeX, camera.eyeY, camera.eyeZ,
                                 fx, fy, fz, wall_t);
 
+      // Check shoot targets (AABB boxes).
       int best_target = -1;
       float best_t = wall_t;
       for (size_t i = 0; i < targets.size(); ++i) {
         const Target &tgt = targets[i];
-        if (!tgt.alive) {
-          continue;
-        }
+        if (!tgt.alive) continue;
         const float h = tgt.half_extent;
         float t_hit;
-        const bool hit = engine::ray_aabb(
-            camera.eyeX, camera.eyeY, camera.eyeZ, fx, fy, fz, tgt.pos_x - h,
-            tgt.pos_y - h, tgt.pos_z - h, tgt.pos_x + h, tgt.pos_y + h,
-            tgt.pos_z + h, t_hit);
-        if (hit && t_hit < best_t) {
+        if (engine::ray_aabb(camera.eyeX, camera.eyeY, camera.eyeZ, fx, fy, fz,
+                             tgt.pos_x - h, tgt.pos_y - h, tgt.pos_z - h,
+                             tgt.pos_x + h, tgt.pos_y + h, tgt.pos_z + h, t_hit)
+            && t_hit < best_t) {
           best_t = t_hit;
           best_target = static_cast<int>(i);
         }
       }
       if (best_target >= 0) {
         Target &tgt = targets[static_cast<size_t>(best_target)];
-        if (--tgt.hits_remaining <= 0) {
-          tgt.alive = false;
+        if (--tgt.hits_remaining <= 0) tgt.alive = false;
+      }
+
+      // Check zombie (capsule).
+      if (zombie_char.model.valid() && zombie_char.alive()) {
+        float ca[3], cb[3];
+        zombie_char.capsule_segment(ca, cb);
+        float t_hit;
+        if (engine::ray_capsule(camera.eyeX, camera.eyeY, camera.eyeZ, fx, fy, fz,
+                                ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
+                                engine::Character::k_radius, t_hit)
+            && t_hit < best_t) {
+          zombie_char.hp -= 34; // ~3 shots to kill
         }
       }
     } else {
@@ -471,8 +486,57 @@ int main(int argc, char **argv) {
       viewmodel.update(dt);
     }
 
-    if (zombie.valid()) {
-      zombie.update(dt);
+    if (zombie_char.model.valid()) {
+      if (!zombie_char.alive()) {
+        if (!zombie_dying) {
+          zombie_dying = true;
+          zombie_char.model.play(engine::ZombieAnim::Death, false, true);
+        }
+        zombie_char.model.update(dt);
+      } else {
+        const float pdx = camera.eyeX - zombie_char.x;
+        const float pdz = camera.eyeZ - zombie_char.z;
+        const float dist_xz = std::sqrt(pdx * pdx + pdz * pdz);
+
+        // +kPi because the glTF model's default forward is -Z; rotating by π
+        // aligns it with +Z so atan2(pdx,pdz) produces the correct facing angle.
+        zombie_char.yaw = std::atan2(pdx, pdz) + bx::kPi;
+
+        constexpr float k_walk_speed = 1.5f;
+        constexpr float k_engage_dist = 1.2f;
+
+        if (dist_xz > k_engage_dist) {
+          const float inv = 1.0f / dist_xz;
+          const float cand_x = zombie_char.x + pdx * inv * k_walk_speed * dt;
+          const float cand_z = zombie_char.z + pdz * inv * k_walk_speed * dt;
+
+          // Wall collision (reuse player slide logic).
+          engine::resolve_xz_slide(level,
+                                   zombie_char.x, zombie_char.z,
+                                   cand_x, cand_z,
+                                   zombie_char.y,
+                                   engine::Character::k_radius,
+                                   engine::PlayerPhysics::k_step_up,
+                                   zombie_char.x, zombie_char.z);
+
+          // Player body collision: push zombie back if it overlaps the player.
+          constexpr float k_min_sep = engine::Character::k_radius
+                                    + engine::PlayerPhysics::k_body_radius_xz;
+          const float sep_dx = zombie_char.x - camera.eyeX;
+          const float sep_dz = zombie_char.z - camera.eyeZ;
+          const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
+          if (sep_dist > 0.0f && sep_dist < k_min_sep) {
+            const float push = (k_min_sep - sep_dist) / sep_dist;
+            zombie_char.x += sep_dx * push;
+            zombie_char.z += sep_dz * push;
+          }
+
+          zombie_char.model.play(engine::ZombieAnim::Walk, true, false);
+        } else {
+          zombie_char.model.play(engine::ZombieAnim::Attack, false, false);
+        }
+        zombie_char.model.update(dt);
+      }
     }
 
     bgfx::dbgTextClear();
@@ -604,15 +668,15 @@ int main(int argc, char **argv) {
       }
     }
 
-    if (zombie.valid() && bgfx::isValid(skinned_program)) {
+    if (zombie_char.model.valid() && bgfx::isValid(skinned_program)) {
       engine::CharacterDrawParams zdp{};
-      zdp.pos[0] = 4.0f;
-      zdp.pos[1] = 0.0f;
-      zdp.pos[2] = 7.0f;
-      zdp.yaw = bx::kPi; // face toward player spawn
-      zdp.scale = 1.0f;
-      zombie.submit_world(0, skinned_program, u_bones, s_albedo, u_baseColor,
-                          white_tex, renderState, zdp);
+      zdp.pos[0] = zombie_char.x;
+      zdp.pos[1] = zombie_char.y;
+      zdp.pos[2] = zombie_char.z;
+      zdp.yaw    = zombie_char.yaw;
+      zdp.scale  = 1.0f;
+      zombie_char.model.submit_world(0, skinned_program, u_bones, s_albedo, u_baseColor,
+                                     white_tex, renderState, zdp);
     }
 
     if (hud_ok) {
@@ -656,7 +720,7 @@ int main(int argc, char **argv) {
 
   engine::audio_shutdown();
   engine::hud_shutdown();
-  zombie.unload();
+  zombie_char.model.unload();
   viewmodel.unload();
   if (bgfx::isValid(floor_tex)) {
     bgfx::destroy(floor_tex);

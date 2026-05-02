@@ -27,4 +27,14 @@ void player_physics_step(
 	float prev_eye_z
 );
 
+/// Resolves candidate XZ movement against walls and cliffs with slide fallback.
+/// Use for any body that moves horizontally (NPCs, etc.).
+void resolve_xz_slide(
+	const Level& level,
+	float prev_x, float prev_z,
+	float cand_x, float cand_z,
+	float feet_y, float radius, float step_up,
+	float& out_x, float& out_z
+);
+
 } // namespace engine

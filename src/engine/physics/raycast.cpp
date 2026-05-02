@@ -70,4 +70,67 @@ bool ray_walls_nearest(const std::vector<Wall> &walls, float ox, float oy, float
   return any;
 }
 
+
+bool ray_capsule(float ox, float oy, float oz,
+                 float dx, float dy, float dz,
+                 float ax, float ay, float az,
+                 float bx, float by, float bz,
+                 float r, float& t_hit) {
+  // Capsule axis vector and derived dot products.
+  const float nx = bx - ax, ny = by - ay, nz = bz - az;
+  const float n_sq = nx*nx + ny*ny + nz*nz; // |AB|²
+
+  // m = ray_origin - capsule_base
+  const float mx = ox - ax, my = oy - ay, mz = oz - az;
+
+  const float n_dot_d = nx*dx + ny*dy + nz*dz;
+  const float n_dot_m = nx*mx + ny*my + nz*mz;
+
+  // Quadratic for infinite cylinder (using non-unit axis, scaled formulation).
+  const float a = n_sq - n_dot_d * n_dot_d;
+  const float k = mx*mx + my*my + mz*mz - r*r;
+  const float c = n_sq * k - n_dot_m * n_dot_m;
+
+  float best = std::numeric_limits<float>::infinity();
+
+  if (std::fabs(a) > 1e-8f) {
+    const float b = n_sq * (dx*mx + dy*my + dz*mz) - n_dot_d * n_dot_m;
+    const float disc = b*b - a*c;
+    if (disc >= 0.0f) {
+      const float sq = std::sqrt(disc);
+      for (float sign : {-1.0f, 1.0f}) {
+        const float t = (-b + sign * sq) / a;
+        if (t < 0.0f) continue;
+        // Keep only the portion within the finite cylinder.
+        const float proj = n_dot_m + t * n_dot_d;
+        if (proj >= 0.0f && proj <= n_sq) {
+          best = std::min(best, t);
+          break; // entry hit found; no need to check exit
+        }
+      }
+    }
+  }
+
+  // End sphere at A and B.
+  auto hit_sphere = [&](float cx, float cy, float cz) {
+    const float smx = ox - cx, smy = oy - cy, smz = oz - cz;
+    const float sb = dx*smx + dy*smy + dz*smz;
+    const float sc = smx*smx + smy*smy + smz*smz - r*r;
+    const float disc = sb*sb - sc;
+    if (disc < 0.0f) return;
+    const float sq = std::sqrt(disc);
+    float t = -sb - sq;
+    if (t < 0.0f) t = -sb + sq;
+    if (t >= 0.0f) best = std::min(best, t);
+  };
+  hit_sphere(ax, ay, az);
+  hit_sphere(bx, by, bz);
+
+  if (best < std::numeric_limits<float>::infinity()) {
+    t_hit = best;
+    return true;
+  }
+  return false;
+}
+
 } // namespace engine

@@ -245,6 +245,17 @@ void resolve_horizontal_slide(
 
 } // namespace
 
+void resolve_xz_slide(
+	const Level& level,
+	float prev_x, float prev_z,
+	float cand_x, float cand_z,
+	float feet_y, float radius, float step_up,
+	float& out_x, float& out_z)
+{
+	resolve_horizontal_slide(level, prev_x, prev_z, cand_x, cand_z,
+	                         feet_y, radius, step_up, out_x, out_z);
+}
+
 void player_physics_step(
 	FpsCamera& camera,
 	PlayerPhysics& physics,
