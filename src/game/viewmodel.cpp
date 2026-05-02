@@ -193,16 +193,20 @@ bgfx::TextureHandle decode_texture_from_memory(const uint8_t* data, size_t size,
 		return BGFX_INVALID_HANDLE;
 	}
 	bx::DefaultAllocator alloc;
-	bimg::ImageContainer* img = bimg::imageParse(&alloc, data, static_cast<uint32_t>(size));
+	bimg::ImageContainer* img = bimg::imageParse(&alloc, data, static_cast<uint32_t>(size),
+		bimg::TextureFormat::RGBA8);
 	if (!img) {
-		std::fprintf(stderr, "  tex: bimg::imageParse failed (size=%zu, magic=0x%02x%02x%02x%02x)\n",
+		std::printf("  tex: imageParse FAILED size=%zu magic=%02x%02x%02x%02x\n",
 			size, data[0], data[1], data[2], data[3]);
 		return BGFX_INVALID_HANDLE;
 	}
-	std::fprintf(stderr, "  tex: bimg %dx%d fmt=%d mips=%d layers=%d\n",
+	std::printf("  tex: decoded %dx%d fmt=%d mips=%d layers=%d size=%u\n",
 		img->m_width, img->m_height, static_cast<int>(img->m_format),
-		static_cast<int>(img->m_numMips), static_cast<int>(img->m_numLayers));
-	if (img->m_cubeMap || img->m_depth > 1) {
+		static_cast<int>(img->m_numMips), static_cast<int>(img->m_numLayers),
+		img->m_size);
+	if (img->m_cubeMap || img->m_depth > 1 || !img->m_data) {
+		std::printf("  tex: rejected (cubeMap=%d depth=%d data=%p)\n",
+			img->m_cubeMap, img->m_depth, img->m_data);
 		bimg::imageFree(img);
 		return BGFX_INVALID_HANDLE;
 	}
@@ -211,12 +215,14 @@ bgfx::TextureHandle decode_texture_from_memory(const uint8_t* data, size_t size,
 		static_cast<uint16_t>(img->m_width),
 		static_cast<uint16_t>(img->m_height),
 		img->m_numMips > 1,
-		img->m_numLayers,
+		static_cast<uint16_t>(img->m_numLayers),
 		static_cast<bgfx::TextureFormat::Enum>(img->m_format),
 		flags,
 		mem
 	);
-	std::fprintf(stderr, "  tex: createTexture2D -> handle=%d\n", h.idx);
+	std::printf("  tex: createTexture2D(%dx%d) -> handle=%d %s\n",
+		img->m_width, img->m_height, h.idx,
+		bgfx::isValid(h) ? "OK" : "FAILED");
 	bimg::imageFree(img);
 	return h;
 }
@@ -524,17 +530,21 @@ bool Viewmodel::load(const char* glb_path, std::string& err)
 		size_t idx = static_cast<size_t>(img - data->images);
 		auto it = image_cache.find(idx);
 		if (it != image_cache.end()) return it->second;
-		std::fprintf(stderr, "  img[%zu]: mime=%s bv=%s uri=%s\n",
-			idx,
-			img->mime_type ? img->mime_type : "(none)",
-			img->buffer_view ? "yes" : "null",
-			img->uri ? img->uri : "(none)");
 		if (!img->buffer_view) {
+			std::printf("  img[%zu]: no buffer_view (uri=%s)\n", idx, img->uri ? img->uri : "none");
 			image_cache[idx] = BGFX_INVALID_HANDLE;
 			return BGFX_INVALID_HANDLE;
 		}
 		const cgltf_buffer_view* bv = img->buffer_view;
+		if (!bv->buffer || !bv->buffer->data) {
+			std::printf("  img[%zu]: buffer data not loaded\n", idx);
+			image_cache[idx] = BGFX_INVALID_HANDLE;
+			return BGFX_INVALID_HANDLE;
+		}
 		const uint8_t* base = static_cast<const uint8_t*>(bv->buffer->data) + bv->offset;
+		std::printf("  img[%zu]: %s size=%zu magic=%02x%02x%02x%02x\n",
+			idx, img->name ? img->name : "?", bv->size,
+			base[0], base[1], base[2], base[3]);
 		bgfx::TextureHandle h = decode_texture_from_memory(base, bv->size, 0);
 		image_cache[idx] = h;
 		if (bgfx::isValid(h)) s_->owned_textures.push_back(h);
