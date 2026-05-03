@@ -291,6 +291,7 @@ int main(int argc, char **argv) {
   zombie_char.z = 7.0f;
   zombie_char.hp = 100;
   bool zombie_dying = false;
+  float zombie_damage_timer = 0.0f;
   {
     std::string zm_err;
     if (!zombie_char.model.load(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", zm_err)) {
@@ -498,14 +499,17 @@ int main(int argc, char **argv) {
         const float pdz = camera.eyeZ - zombie_char.z;
         const float dist_xz = std::sqrt(pdx * pdx + pdz * pdz);
 
-        // +kPi because the glTF model's default forward is -Z; rotating by π
-        // aligns it with +Z so atan2(pdx,pdz) produces the correct facing angle.
-        zombie_char.yaw = std::atan2(pdx, pdz) + bx::kPi;
+        // bx::mtxRotateY maps +Z model-forward to world (-sin(a), 0, cos(a)).
+        // To face direction (pdx, pdz), solve -sin(a)=pdx_n, cos(a)=pdz_n → atan2(-pdx, pdz).
+        zombie_char.yaw = std::atan2(-pdx, pdz);
 
         constexpr float k_walk_speed = 1.5f;
         constexpr float k_engage_dist = 1.2f;
+        constexpr float k_min_sep = engine::Character::k_radius
+                                  + engine::PlayerPhysics::k_body_radius_xz;
 
         if (dist_xz > k_engage_dist) {
+          zombie_damage_timer = 0.0f; // reset attack timer while not in range
           const float inv = 1.0f / dist_xz;
           const float cand_x = zombie_char.x + pdx * inv * k_walk_speed * dt;
           const float cand_z = zombie_char.z + pdz * inv * k_walk_speed * dt;
@@ -519,21 +523,30 @@ int main(int argc, char **argv) {
                                    engine::PlayerPhysics::k_step_up,
                                    zombie_char.x, zombie_char.z);
 
-          // Player body collision: push zombie back if it overlaps the player.
-          constexpr float k_min_sep = engine::Character::k_radius
-                                    + engine::PlayerPhysics::k_body_radius_xz;
-          const float sep_dx = zombie_char.x - camera.eyeX;
-          const float sep_dz = zombie_char.z - camera.eyeZ;
-          const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
-          if (sep_dist > 0.0f && sep_dist < k_min_sep) {
-            const float push = (k_min_sep - sep_dist) / sep_dist;
-            zombie_char.x += sep_dx * push;
-            zombie_char.z += sep_dz * push;
-          }
-
           zombie_char.model.play(engine::ZombieAnim::Walk, true, false);
         } else {
+          // Attack: deal 10 HP/s of damage to the player.
+          zombie_damage_timer += dt;
+          constexpr float k_damage_interval = 1.0f;
+          constexpr int k_damage_per_hit = 10;
+          if (zombie_damage_timer >= k_damage_interval) {
+            zombie_damage_timer -= k_damage_interval;
+            player_health -= k_damage_per_hit;
+            if (player_health < 0) player_health = 0;
+          }
           zombie_char.model.play(engine::ZombieAnim::Attack, false, false);
+        }
+
+        // Push both bodies apart so neither can fully overlap the other.
+        const float sep_dx = zombie_char.x - camera.eyeX;
+        const float sep_dz = zombie_char.z - camera.eyeZ;
+        const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
+        if (sep_dist > 0.0f && sep_dist < k_min_sep) {
+          const float half_push = 0.5f * (k_min_sep - sep_dist) / sep_dist;
+          zombie_char.x += sep_dx * half_push;
+          zombie_char.z += sep_dz * half_push;
+          camera.eyeX  -= sep_dx * half_push;
+          camera.eyeZ  -= sep_dz * half_push;
         }
         zombie_char.model.update(dt);
       }
