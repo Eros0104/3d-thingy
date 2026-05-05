@@ -91,6 +91,7 @@ add_executable(fps_engine
   src/engine/application/application.cpp
   src/engine/renderer/renderer.cpp
   src/engine/audio.cpp
+  src/engine/log.cpp
   src/game/fps_camera.cpp
   src/engine/geometry/primitives.cpp
   src/engine/physics/raycast.cpp

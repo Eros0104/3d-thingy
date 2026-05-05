@@ -1,17 +1,18 @@
 #include "engine/application/application.hpp"
+#include "engine/log.hpp"
 #include "engine/renderer/renderer.hpp"
 #include "engine/window.hpp"
 #include "game/game_state.hpp"
 
 #include <SDL.h>
 
-#include <cstdio>
-
 #ifndef ENGINE_MAPS_DIR
 #define ENGINE_MAPS_DIR "maps"
 #endif
 
 int main(int argc, char** argv) {
+    engine::log_init(engine::LogLevel::Debug);
+
     const char* level_path = ENGINE_MAPS_DIR "/mansion.json";
     if (argc >= 2) level_path = argv[1];
 
@@ -20,7 +21,7 @@ int main(int argc, char** argv) {
 
     Window window;
     if (!window.create("fps-engine (SDL2 + bgfx)", 1280, 720)) {
-        std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        LOG_ERROR("SDL_CreateWindow failed: %s", SDL_GetError());
         return 1;
     }
 
@@ -61,5 +62,6 @@ int main(int argc, char** argv) {
     }
 
     state.shutdown();
+    engine::log_shutdown();
     return 0;
 }

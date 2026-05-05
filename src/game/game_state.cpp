@@ -6,6 +6,7 @@
 #include "engine/lit_vertex.hpp"
 #include "engine/physics/raycast.hpp"
 #include "engine/render/buffers.hpp"
+#include "engine/log.hpp"
 #include "engine/shader_program.hpp"
 #include "engine/texture_loader.hpp"
 #include "game/level/level_loader.hpp"
@@ -56,16 +57,15 @@ bool GameState::init(const char *level_path, int width, int height) {
   {
     std::string err;
     if (!engine::audio_init(err)) {
-      std::fprintf(stderr, "audio: %s (continuing without sound)\n",
-                   err.c_str());
+      LOG_WARN("audio: %s (continuing without sound)", err.c_str());
     } else {
       shot_sound_ =
           engine::audio_load(ENGINE_SOUNDS_DIR "/pistol_shot.mp3", err);
       if (shot_sound_ == engine::k_invalid_sound)
-        std::fprintf(stderr, "audio: %s\n", err.c_str());
+        LOG_WARN("audio: %s", err.c_str());
       step_sound_ = engine::audio_load(ENGINE_SOUNDS_DIR "/footsteps.mp3", err);
       if (step_sound_ == engine::k_invalid_sound)
-        std::fprintf(stderr, "audio: %s\n", err.c_str());
+        LOG_WARN("audio: %s", err.c_str());
     }
   }
 
@@ -73,7 +73,7 @@ bool GameState::init(const char *level_path, int width, int height) {
   {
     std::string err;
     if (!engine::load_level_any(level_path, level_, err)) {
-      std::fprintf(stderr, "load_level: %s\n", err.c_str());
+      LOG_ERROR("load_level: %s", err.c_str());
       return false;
     }
   }
@@ -83,7 +83,7 @@ bool GameState::init(const char *level_path, int width, int height) {
     engine::LevelMeshOutput meshes;
     engine::build_level_meshes(level_, meshes);
     if (meshes.floor_vertices.empty()) {
-      std::fprintf(stderr, "level has no floor geometry (sectors empty?)\n");
+      LOG_ERROR("level has no floor geometry (sectors empty?)");
       return false;
     }
 
@@ -106,7 +106,7 @@ bool GameState::init(const char *level_path, int width, int height) {
   hud_program_ = engine::load_hud_program();
 
   if (!bgfx::isValid(program_)) {
-    std::fprintf(stderr, "triangle shader failed\n");
+    LOG_ERROR("triangle shader failed");
     return false;
   }
 
@@ -118,7 +118,7 @@ bool GameState::init(const char *level_path, int width, int height) {
     desc.program = hud_program_;
     std::string err;
     if (!engine::hud_init(desc, err))
-      std::fprintf(stderr, "hud: %s (continuing without HUD)\n", err.c_str());
+      LOG_WARN("hud: %s (continuing without HUD)", err.c_str());
     else
       hud_ok_ = true;
   }
@@ -189,7 +189,7 @@ bool GameState::init(const char *level_path, int width, int height) {
   camera_.yaw = level_.spawn.yaw_deg * (bx::kPi / 180.0f);
 
   if (SDL_SetRelativeMouseMode(SDL_TRUE) != 0)
-    std::fprintf(stderr, "SDL_SetRelativeMouseMode: %s\n", SDL_GetError());
+    LOG_WARN("SDL_SetRelativeMouseMode: %s", SDL_GetError());
 
   // Player viewmodel (gun)
   {
@@ -197,7 +197,7 @@ bool GameState::init(const char *level_path, int width, int height) {
     viewmodel_model_ =
         load_model(ENGINE_MODELS_DIR "/animated_pistol-v2.glb", err);
     if (!viewmodel_model_) {
-      std::fprintf(stderr, "viewmodel: %s\n", err.c_str());
+      LOG_WARN("viewmodel: %s", err.c_str());
     } else {
       viewmodel_anim_.bind(*viewmodel_model_);
       viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Take, false,
@@ -297,7 +297,7 @@ entt::entity GameState::spawn_zombie(float x, float y, float z) {
   engine::RiggedModel *m =
       load_model(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", err);
   if (!m)
-    std::fprintf(stderr, "zombie model: %s\n", err.c_str());
+    LOG_WARN("zombie model: %s", err.c_str());
 
   auto e = registry_.create();
   auto &tr = registry_.emplace<game::TransformC>(e);
