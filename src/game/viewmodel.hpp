@@ -59,8 +59,10 @@ public:
 
 	void play(ViewmodelAnim anim, bool loop, bool restart_if_same);
 	void play(ZombieAnim anim, bool loop, bool restart_if_same);
+	void play_random(ZombieAnim anim, bool loop);
 	bool current_anim_finished() const;
 	ViewmodelAnim current_anim() const;
+	ZombieAnim current_zombie_anim() const;
 
 	void update(float dt);
 

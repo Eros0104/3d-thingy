@@ -279,15 +279,31 @@ struct Viewmodel::State {
 	std::vector<bgfx::TextureHandle> owned_textures;
 	std::vector<Animation> animations;
 	int anim_lookup[static_cast<int>(ViewmodelAnim::Count)] = {-1, -1, -1, -1};
-	int zombie_anim_lookup[static_cast<int>(ZombieAnim::Count)] = {-1, -1, -1, -1, -1, -1};
+	// Each zombie anim slot can have multiple variants; play_random picks among them.
+	std::vector<int> zombie_anim_lookup[static_cast<int>(ZombieAnim::Count)];
 
 	int current = -1; // raw index into animations[], -1 = none
 	float time = 0.0f;
 	bool looping = true;
 	bool finished = false;
 
+	// Crossfade: blend from prev_pose → current anim over crossfade_dur seconds.
+	std::vector<LocalTRS> prev_pose;
+	float crossfade_dur = 0.15f;
+	float crossfade_remaining = 0.0f;
+	bool crossfading = false;
+
 	std::vector<float> bone_matrices;
 	bool loaded = false;
+
+	// Capture current node poses into prev_pose and start a crossfade toward new_raw.
+	void start_crossfade(int new_raw) {
+		if (new_raw == current || current < 0 || prev_pose.empty()) return;
+		const size_t n = std::min(nodes.size(), prev_pose.size());
+		for (size_t i = 0; i < n; ++i) prev_pose[i] = nodes[i].current;
+		crossfade_remaining = crossfade_dur;
+		crossfading = true;
+	}
 };
 
 Viewmodel::Viewmodel() : s_(new State())
@@ -331,7 +347,9 @@ void Viewmodel::unload()
 	s_->traversal.clear();
 	s_->animations.clear();
 	for (int i = 0; i < static_cast<int>(ViewmodelAnim::Count); ++i) s_->anim_lookup[i] = -1;
-	for (int i = 0; i < static_cast<int>(ZombieAnim::Count); ++i) s_->zombie_anim_lookup[i] = -1;
+	for (int i = 0; i < static_cast<int>(ZombieAnim::Count); ++i) s_->zombie_anim_lookup[i].clear();
+	s_->prev_pose.clear();
+	s_->crossfading = false;
 	s_->current = -1;
 	s_->loaded = false;
 }
@@ -365,16 +383,42 @@ void Viewmodel::play(ZombieAnim anim, bool loop, bool restart_if_same)
 {
 	int slot = static_cast<int>(anim);
 	if (slot < 0 || slot >= static_cast<int>(ZombieAnim::Count)) return;
-	int raw = s_->zombie_anim_lookup[slot];
-	if (raw < 0) return;
+	const auto& variants = s_->zombie_anim_lookup[slot];
+	if (variants.empty()) return;
+	int raw = variants[0];
 	if (raw == s_->current && !restart_if_same) {
 		s_->looping = loop;
 		return;
 	}
+	s_->start_crossfade(raw);
 	s_->current = raw;
 	s_->time = 0.0f;
 	s_->looping = loop;
 	s_->finished = false;
+}
+
+void Viewmodel::play_random(ZombieAnim anim, bool loop)
+{
+	int slot = static_cast<int>(anim);
+	if (slot < 0 || slot >= static_cast<int>(ZombieAnim::Count)) return;
+	const auto& variants = s_->zombie_anim_lookup[slot];
+	if (variants.empty()) return;
+	int raw = variants[static_cast<size_t>(std::rand()) % variants.size()];
+	s_->start_crossfade(raw);
+	s_->current = raw;
+	s_->time = 0.0f;
+	s_->looping = loop;
+	s_->finished = false;
+}
+
+ZombieAnim Viewmodel::current_zombie_anim() const
+{
+	for (int i = 0; i < static_cast<int>(ZombieAnim::Count); ++i) {
+		for (int raw : s_->zombie_anim_lookup[i]) {
+			if (raw == s_->current) return static_cast<ZombieAnim>(i);
+		}
+	}
+	return ZombieAnim::Idle;
 }
 
 bool Viewmodel::load(const char* glb_path, std::string& err)
@@ -751,8 +795,7 @@ bool Viewmodel::load(const char* glb_path, std::string& err)
 		}
 		ZombieAnim zslot = classify_zombie_anim_name(a.name.c_str());
 		if (zslot != ZombieAnim::Count) {
-			int& entry = s_->zombie_anim_lookup[static_cast<int>(zslot)];
-			if (entry < 0) entry = static_cast<int>(ai); // first match wins
+			s_->zombie_anim_lookup[static_cast<int>(zslot)].push_back(static_cast<int>(ai));
 		}
 	}
 
@@ -761,11 +804,21 @@ bool Viewmodel::load(const char* glb_path, std::string& err)
 	// Initial pose: rest TRS, no animation, world matrices computed once.
 	for (auto& n : s_->nodes) n.current = n.rest;
 
-	std::printf("viewmodel loaded: nodes=%zu joints=%zu primitives=%zu anims=%zu (idle=%d shoot=%d reload=%d take=%d) (z_idle=%d z_walk=%d z_run=%d z_attack=%d z_death=%d z_hit=%d)\n",
+	// Pre-allocate crossfade snapshot buffer.
+	s_->prev_pose.resize(s_->nodes.size());
+	for (size_t i = 0; i < s_->nodes.size(); ++i) s_->prev_pose[i] = s_->nodes[i].rest;
+
+	auto zfirst = [&](ZombieAnim a) -> int {
+		const auto& v = s_->zombie_anim_lookup[static_cast<int>(a)];
+		return v.empty() ? -1 : v[0];
+	};
+	std::printf("viewmodel loaded: nodes=%zu joints=%zu primitives=%zu anims=%zu (idle=%d shoot=%d reload=%d take=%d) (z_idle=%d z_walk=%d z_run=%d z_attack=%d[%zu] z_death=%d z_hit=%d[%zu])\n",
 		s_->nodes.size(), s_->joint_nodes.size(), s_->primitives.size(), s_->animations.size(),
 		s_->anim_lookup[0], s_->anim_lookup[1], s_->anim_lookup[2], s_->anim_lookup[3],
-		s_->zombie_anim_lookup[0], s_->zombie_anim_lookup[1], s_->zombie_anim_lookup[2],
-		s_->zombie_anim_lookup[3], s_->zombie_anim_lookup[4], s_->zombie_anim_lookup[5]);
+		zfirst(ZombieAnim::Idle), zfirst(ZombieAnim::Walk), zfirst(ZombieAnim::Run),
+		zfirst(ZombieAnim::Attack), s_->zombie_anim_lookup[static_cast<int>(ZombieAnim::Attack)].size(),
+		zfirst(ZombieAnim::Death),
+		zfirst(ZombieAnim::GetHit), s_->zombie_anim_lookup[static_cast<int>(ZombieAnim::GetHit)].size());
 
 	s_->loaded = true;
 	return true;
@@ -836,6 +889,31 @@ void Viewmodel::update(float dt)
 						break;
 					}
 				}
+			}
+		}
+	}
+
+	// Crossfade: blend prev_pose → current animation.
+	if (s_->crossfading && !s_->prev_pose.empty()) {
+		s_->crossfade_remaining -= dt;
+		if (s_->crossfade_remaining <= 0.0f) {
+			s_->crossfading = false;
+		} else {
+			const float alpha = 1.0f - s_->crossfade_remaining / s_->crossfade_dur;
+			const size_t n = std::min(s_->nodes.size(), s_->prev_pose.size());
+			for (size_t i = 0; i < n; ++i) {
+				NodeData& nd = s_->nodes[i];
+				const LocalTRS& prev = s_->prev_pose[i];
+				nd.current.t[0] = prev.t[0] + alpha * (nd.current.t[0] - prev.t[0]);
+				nd.current.t[1] = prev.t[1] + alpha * (nd.current.t[1] - prev.t[1]);
+				nd.current.t[2] = prev.t[2] + alpha * (nd.current.t[2] - prev.t[2]);
+				nd.current.s[0] = prev.s[0] + alpha * (nd.current.s[0] - prev.s[0]);
+				nd.current.s[1] = prev.s[1] + alpha * (nd.current.s[1] - prev.s[1]);
+				nd.current.s[2] = prev.s[2] + alpha * (nd.current.s[2] - prev.s[2]);
+				float q0[4] = {prev.r[0], prev.r[1], prev.r[2], prev.r[3]};
+				float q1[4] = {nd.current.r[0], nd.current.r[1], nd.current.r[2], nd.current.r[3]};
+				quat_slerp(q0, q1, alpha, nd.current.r);
+				quat_normalize(nd.current.r);
 			}
 		}
 	}

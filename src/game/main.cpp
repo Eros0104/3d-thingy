@@ -292,6 +292,7 @@ int main(int argc, char **argv) {
   zombie_char.hp = 100;
   bool zombie_dying = false;
   float zombie_damage_timer = 0.0f;
+  float zombie_hit_stun_timer = 0.0f;
   {
     std::string zm_err;
     if (!zombie_char.model.load(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", zm_err)) {
@@ -448,7 +449,11 @@ int main(int argc, char **argv) {
                                 ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
                                 engine::Character::k_radius, t_hit)
             && t_hit < best_t) {
-          zombie_char.hp -= 34; // ~3 shots to kill
+          zombie_char.hp -= 10;
+          if (zombie_char.alive() && std::rand() % 2 == 0) {
+            zombie_char.model.play(engine::ZombieAnim::GetHit, false, true);
+            zombie_hit_stun_timer = 0.5f;
+          }
         }
       }
     } else {
@@ -508,7 +513,11 @@ int main(int argc, char **argv) {
         constexpr float k_min_sep = engine::Character::k_radius
                                   + engine::PlayerPhysics::k_body_radius_xz;
 
-        if (dist_xz > k_engage_dist) {
+        // Hit stun: let the GetHit animation finish before resuming AI.
+        if (zombie_hit_stun_timer > 0.0f) {
+          zombie_hit_stun_timer -= dt;
+          if (zombie_hit_stun_timer < 0.0f) zombie_hit_stun_timer = 0.0f;
+        } else if (dist_xz > k_engage_dist) {
           zombie_damage_timer = 0.0f; // reset attack timer while not in range
           const float inv = 1.0f / dist_xz;
           const float cand_x = zombie_char.x + pdx * inv * k_walk_speed * dt;
@@ -534,7 +543,11 @@ int main(int argc, char **argv) {
             player_health -= k_damage_per_hit;
             if (player_health < 0) player_health = 0;
           }
-          zombie_char.model.play(engine::ZombieAnim::Attack, false, false);
+          // Restart attack when the one-shot finishes (picks a random variant).
+          if (zombie_char.model.current_zombie_anim() != engine::ZombieAnim::Attack
+              || zombie_char.model.current_anim_finished()) {
+            zombie_char.model.play_random(engine::ZombieAnim::Attack, false);
+          }
         }
 
         // Push both bodies apart so neither can fully overlap the other.
@@ -543,10 +556,20 @@ int main(int argc, char **argv) {
         const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
         if (sep_dist > 0.0f && sep_dist < k_min_sep) {
           const float half_push = 0.5f * (k_min_sep - sep_dist) / sep_dist;
+          const float prev_zx = zombie_char.x;
+          const float prev_zz = zombie_char.z;
           zombie_char.x += sep_dx * half_push;
           zombie_char.z += sep_dz * half_push;
           camera.eyeX  -= sep_dx * half_push;
           camera.eyeZ  -= sep_dz * half_push;
+          // Prevent the zombie from being pushed through a wall by this impulse.
+          engine::resolve_xz_slide(level,
+                                   prev_zx, prev_zz,
+                                   zombie_char.x, zombie_char.z,
+                                   zombie_char.y,
+                                   engine::Character::k_radius,
+                                   engine::PlayerPhysics::k_step_up,
+                                   zombie_char.x, zombie_char.z);
         }
         zombie_char.model.update(dt);
       }
