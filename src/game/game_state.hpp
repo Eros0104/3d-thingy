@@ -1,12 +1,12 @@
 #pragma once
 
 #include "engine/audio.hpp"
-#include "engine/lit_vertex.hpp"
+#include "engine/rigged_model.hpp"
+#include "game/animator.hpp"
 #include "game/components.hpp"
 #include "game/fps_camera.hpp"
 #include "game/level/level_data.hpp"
 #include "game/physics_world.hpp"
-#include "game/viewmodel.hpp"
 
 #include <SDL.h>
 #include <bgfx/bgfx.h>
@@ -33,14 +33,12 @@ public:
     void render(int width, int height);
 
 private:
-    // --- entity factories ---
     entt::entity spawn_zombie(float x, float y, float z);
     entt::entity spawn_target(float x, float y, float z);
 
-    // Load a GLB into the models pool; returns index or -1 on failure.
-    int load_model(const char* path, std::string& err);
+    // Loads a GLB into the model pool; returns a non-owning pointer or nullptr on failure.
+    engine::RiggedModel* load_model(const char* path, std::string& err);
 
-    // --- systems ---
     void sys_shooting();
     void sys_viewmodel_anim(float dt);
     void sys_zombie_ai(float dt);
@@ -54,8 +52,8 @@ private:
     // --- ECS ---
     entt::registry registry_;
 
-    // Owned model pool — Viewmodel is non-copyable so we store unique_ptrs.
-    std::vector<std::unique_ptr<engine::Viewmodel>> models_;
+    // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
+    std::vector<std::unique_ptr<engine::RiggedModel>> models_;
 
     // --- player (singleton, not an entity) ---
     FpsCamera             camera_{};
@@ -68,12 +66,13 @@ private:
     bool mouse_look_      = true;
     bool show_axes_gizmo_ = false;
 
-    // Index of the player's gun model in models_ (-1 if not loaded).
-    int viewmodel_idx_ = -1;
+    // Player viewmodel (gun).
+    engine::RiggedModel* viewmodel_model_ = nullptr;
+    game::Animator       viewmodel_anim_;
 
     // --- per-frame input (accumulated in handle_event, consumed in update) ---
-    float mouse_rel_x_  = 0.f;
-    float mouse_rel_y_  = 0.f;
+    float mouse_rel_x_   = 0.f;
+    float mouse_rel_y_   = 0.f;
     bool  shoot_pressed_  = false;
     bool  reload_pressed_ = false;
 

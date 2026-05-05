@@ -102,7 +102,8 @@ add_executable(fps_engine
   src/game/level/level_binary.cpp
   src/engine/shader_program.cpp
   src/engine/texture_loader.cpp
-  src/game/viewmodel.cpp
+  src/engine/rigged_model.cpp
+  src/game/animator.cpp
   src/engine/window.cpp
   src/engine/hud.cpp
   shaders/vs_triangle.sc

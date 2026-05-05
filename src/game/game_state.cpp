@@ -8,7 +8,6 @@
 #include "engine/render/buffers.hpp"
 #include "engine/shader_program.hpp"
 #include "engine/texture_loader.hpp"
-#include "game/character.hpp"
 #include "game/level/level_loader.hpp"
 #include "game/level/level_mesh.hpp"
 
@@ -184,13 +183,13 @@ bool GameState::init(const char* level_path, int width, int height) {
     // Player viewmodel (gun)
     {
         std::string err;
-        viewmodel_idx_ = load_model(ENGINE_MODELS_DIR "/animated_pistol-v2.glb", err);
-        if (viewmodel_idx_ < 0) {
+        viewmodel_model_ = load_model(ENGINE_MODELS_DIR "/animated_pistol-v2.glb", err);
+        if (!viewmodel_model_) {
             std::fprintf(stderr, "viewmodel: %s\n", err.c_str());
         } else {
-            auto& vm = *models_[viewmodel_idx_];
-            vm.play(engine::ViewmodelAnim::Take, false, true);
-            vm.play(engine::ViewmodelAnim::Idle, true, false);
+            viewmodel_anim_.bind(*viewmodel_model_);
+            viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Take, false, true);
+            viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Idle, true, false);
         }
     }
 
@@ -241,21 +240,19 @@ void GameState::shutdown() {
 // Entity factories
 // ============================================================
 
-int GameState::load_model(const char* path, std::string& err) {
-    auto vm = std::make_unique<engine::Viewmodel>();
-    if (!vm->load(path, err))
-        return -1;
-    models_.push_back(std::move(vm));
-    return static_cast<int>(models_.size()) - 1;
+engine::RiggedModel* GameState::load_model(const char* path, std::string& err) {
+    auto m = std::make_unique<engine::RiggedModel>();
+    if (!m->load(path, err))
+        return nullptr;
+    models_.push_back(std::move(m));
+    return models_.back().get();
 }
 
 entt::entity GameState::spawn_zombie(float x, float y, float z) {
     std::string err;
-    int idx = load_model(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", err);
-    if (idx < 0)
+    engine::RiggedModel* m = load_model(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", err);
+    if (!m)
         std::fprintf(stderr, "zombie model: %s\n", err.c_str());
-    else
-        models_[idx]->play(engine::ZombieAnim::Idle, true, true);
 
     auto e = registry_.create();
     auto& tr = registry_.emplace<game::TransformC>(e);
@@ -263,7 +260,11 @@ entt::entity GameState::spawn_zombie(float x, float y, float z) {
     registry_.emplace<game::HealthC>(e);
     registry_.emplace<game::ZombieAIC>(e);
     auto& sm = registry_.emplace<game::SkinnedModelC>(e);
-    sm.model_idx = idx;
+    sm.model = m;
+    if (m) {
+        sm.anim.bind(*m);
+        sm.anim.play(*m, game::ZombieAnim::Idle, true, true);
+    }
     registry_.emplace<game::ZombieTag>(e);
     return e;
 }
@@ -409,51 +410,51 @@ void GameState::sys_shooting() {
         auto& hp = registry_.get<game::HealthC>(entity);
         auto& ai = registry_.get<game::ZombieAIC>(entity);
         auto& sm = registry_.get<game::SkinnedModelC>(entity);
-        if (!hp.alive() || sm.model_idx < 0) continue;
+        if (!hp.alive() || !sm.model) continue;
 
-        const float ca[3] = {tr.x, tr.y + engine::Character::k_radius, tr.z};
-        const float cb[3] = {tr.x, tr.y + engine::Character::k_height - engine::Character::k_radius, tr.z};
+        const float ca[3] = {tr.x, tr.y + game::ZombieAIC::k_radius, tr.z};
+        const float cb[3] = {tr.x, tr.y + game::ZombieAIC::k_height - game::ZombieAIC::k_radius, tr.z};
         float t_hit;
         if (engine::ray_capsule(camera_.eyeX, camera_.eyeY, camera_.eyeZ, fx, fy, fz,
                                 ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
-                                engine::Character::k_radius, t_hit) && t_hit < best_t) {
+                                game::ZombieAIC::k_radius, t_hit) && t_hit < best_t) {
             best_t = t_hit;
             hp.hp -= 10;
             if (hp.alive() && std::rand() % 2 == 0) {
-                models_[sm.model_idx]->play(engine::ZombieAnim::GetHit, false, true);
+                sm.anim.play(*sm.model, game::ZombieAnim::GetHit, false, true);
                 ai.hit_stun_timer = 0.5f;
             }
         }
     }
 
     // Trigger viewmodel shoot animation.
-    if (viewmodel_idx_ >= 0 && models_[viewmodel_idx_]->valid())
-        models_[viewmodel_idx_]->play(engine::ViewmodelAnim::Shoot, false, true);
+    if (viewmodel_model_ && viewmodel_model_->valid())
+        viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Shoot, false, true);
 }
 
 // --- system: viewmodel animation ---
 
 void GameState::sys_viewmodel_anim(float dt) {
-    if (viewmodel_idx_ < 0) return;
-    auto& vm = *models_[viewmodel_idx_];
+    if (!viewmodel_model_) return;
+    auto& vm = *viewmodel_model_;
     if (!vm.valid()) return;
 
-    const engine::ViewmodelAnim cur = vm.current_anim();
+    const game::ViewmodelAnim cur = viewmodel_anim_.current_vm(vm);
 
     // Reload completion
-    if (is_reloading_ && cur == engine::ViewmodelAnim::Reload && vm.current_anim_finished()) {
+    if (is_reloading_ && cur == game::ViewmodelAnim::Reload && vm.current_finished()) {
         bullets_in_clip_ = clip_size_;
         is_reloading_    = false;
     }
 
     if (reload_pressed_ && is_reloading_) {
-        vm.play(engine::ViewmodelAnim::Reload, false, true);
+        viewmodel_anim_.play(vm, game::ViewmodelAnim::Reload, false, true);
     } else {
-        const bool one_shot = cur == engine::ViewmodelAnim::Shoot ||
-                              cur == engine::ViewmodelAnim::Reload ||
-                              cur == engine::ViewmodelAnim::Take;
-        if (one_shot && vm.current_anim_finished())
-            vm.play(engine::ViewmodelAnim::Idle, true, false);
+        const bool one_shot = cur == game::ViewmodelAnim::Shoot ||
+                              cur == game::ViewmodelAnim::Reload ||
+                              cur == game::ViewmodelAnim::Take;
+        if (one_shot && vm.current_finished())
+            viewmodel_anim_.play(vm, game::ViewmodelAnim::Idle, true, false);
     }
 
     vm.update(dt);
@@ -462,12 +463,12 @@ void GameState::sys_viewmodel_anim(float dt) {
 // --- system: zombie AI ---
 
 void GameState::sys_zombie_ai(float dt) {
-    constexpr float k_walk_speed    = 1.5f;
-    constexpr float k_engage_dist   = 1.2f;
+    constexpr float k_walk_speed      = 1.5f;
+    constexpr float k_engage_dist     = 1.2f;
     constexpr float k_damage_interval = 1.0f;
     constexpr int   k_damage_per_hit  = 10;
     constexpr float k_min_sep =
-        engine::Character::k_radius + engine::PlayerPhysics::k_body_radius_xz;
+        game::ZombieAIC::k_radius + engine::PlayerPhysics::k_body_radius_xz;
 
     for (auto entity : registry_.view<game::ZombieTag>()) {
         auto& tr = registry_.get<game::TransformC>(entity);
@@ -475,14 +476,14 @@ void GameState::sys_zombie_ai(float dt) {
         auto& ai = registry_.get<game::ZombieAIC>(entity);
         auto& sm = registry_.get<game::SkinnedModelC>(entity);
 
-        if (sm.model_idx < 0) continue;
-        auto& model = *models_[sm.model_idx];
+        if (!sm.model) continue;
+        auto& model = *sm.model;
         if (!model.valid()) continue;
 
         if (!hp.alive()) {
             if (!ai.dying) {
                 ai.dying = true;
-                model.play(engine::ZombieAnim::Death, false, true);
+                sm.anim.play(model, game::ZombieAnim::Death, false, true);
             }
             model.update(dt);
             continue;
@@ -492,8 +493,6 @@ void GameState::sys_zombie_ai(float dt) {
         const float pdz      = camera_.eyeZ - tr.z;
         const float dist_xz  = std::sqrt(pdx * pdx + pdz * pdz);
 
-        // bx::mtxRotateY maps model +Z → (-sin, 0, cos); to face (pdx, pdz):
-        // -sin(a) = pdx_n, cos(a) = pdz_n → atan2(-pdx, pdz).
         tr.yaw = std::atan2(-pdx, pdz);
 
         if (ai.hit_stun_timer > 0.f) {
@@ -506,18 +505,18 @@ void GameState::sys_zombie_ai(float dt) {
             const float cand_z = tr.z + pdz * inv * k_walk_speed * dt;
             engine::resolve_xz_slide(level_,
                 tr.x, tr.z, cand_x, cand_z,
-                tr.y, engine::Character::k_radius, engine::PlayerPhysics::k_step_up,
+                tr.y, game::ZombieAIC::k_radius, engine::PlayerPhysics::k_step_up,
                 tr.x, tr.z);
-            model.play(engine::ZombieAnim::Walk, true, false);
+            sm.anim.play(model, game::ZombieAnim::Walk, true, false);
         } else {
             ai.damage_timer += dt;
             if (ai.damage_timer >= k_damage_interval) {
                 ai.damage_timer -= k_damage_interval;
                 player_health_ = std::max(0, player_health_ - k_damage_per_hit);
             }
-            if (model.current_zombie_anim() != engine::ZombieAnim::Attack
-                || model.current_anim_finished()) {
-                model.play_random(engine::ZombieAnim::Attack, false);
+            if (sm.anim.current_z(model) != game::ZombieAnim::Attack
+                || model.current_finished()) {
+                sm.anim.play_random(model, game::ZombieAnim::Attack, false);
             }
         }
 
@@ -535,7 +534,7 @@ void GameState::sys_zombie_ai(float dt) {
             camera_.eyeZ -= sep_dz * half_push;
             engine::resolve_xz_slide(level_,
                 prev_zx, prev_zz, tr.x, tr.z,
-                tr.y, engine::Character::k_radius, engine::PlayerPhysics::k_step_up,
+                tr.y, game::ZombieAIC::k_radius, engine::PlayerPhysics::k_step_up,
                 tr.x, tr.z);
         }
 
@@ -654,7 +653,7 @@ void GameState::sys_render_characters() {
     if (!bgfx::isValid(skinned_program_)) return;
 
     // Player viewmodel
-    if (viewmodel_idx_ >= 0 && models_[viewmodel_idx_]->valid()) {
+    if (viewmodel_model_ && viewmodel_model_->valid()) {
         engine::ViewmodelDrawParams vmp{};
         vmp.eye[0]   = camera_.eyeX;
         vmp.eye[1]   = camera_.eyeY;
@@ -665,25 +664,23 @@ void GameState::sys_render_characters() {
         vmp.offset[1] = -1.575f;
         vmp.offset[2] = 0.0f;
         vmp.scale    = 1.f;
-        models_[viewmodel_idx_]->submit(1, skinned_program_, u_bones_, s_albedo_,
-                                        u_baseColor_, white_tex_, render_state_, vmp);
+        viewmodel_model_->submit_viewmodel(1, skinned_program_, u_bones_, s_albedo_,
+                                           u_baseColor_, white_tex_, render_state_, vmp);
         if (show_axes_gizmo_ && bgfx::isValid(debug_program_))
-            models_[viewmodel_idx_]->submit_axes_gizmo(1, debug_program_, vmp, 0.30f);
+            viewmodel_model_->submit_axes_gizmo(1, debug_program_, vmp, 0.30f);
     }
 
     // World-space characters (zombies)
     for (auto entity : registry_.view<game::ZombieTag>()) {
         const auto& tr = registry_.get<game::TransformC>(entity);
         const auto& sm = registry_.get<game::SkinnedModelC>(entity);
-        if (sm.model_idx < 0) continue;
-        auto& model = *models_[sm.model_idx];
-        if (!model.valid()) continue;
+        if (!sm.model || !sm.model->valid()) continue;
         engine::CharacterDrawParams cdp{};
         cdp.pos[0] = tr.x; cdp.pos[1] = tr.y; cdp.pos[2] = tr.z;
         cdp.yaw    = tr.yaw;
         cdp.scale  = 1.f;
-        model.submit_world(0, skinned_program_, u_bones_, s_albedo_,
-                           u_baseColor_, white_tex_, render_state_, cdp);
+        sm.model->submit_world(0, skinned_program_, u_bones_, s_albedo_,
+                               u_baseColor_, white_tex_, render_state_, cdp);
     }
 }
 
