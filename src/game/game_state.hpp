@@ -3,8 +3,8 @@
 #include "engine/audio.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/animator.hpp"
-#include "game/components.hpp"
 #include "game/fps_camera.hpp"
+#include "game/zombie.hpp"
 #include "game/level/level_data.hpp"
 #include "game/physics_world.hpp"
 
@@ -33,7 +33,7 @@ public:
     void render(int width, int height);
 
 private:
-    entt::entity spawn_zombie(float x, float y, float z);
+    void spawn_zombie(float x, float y, float z);
     entt::entity spawn_target(float x, float y, float z);
 
     // Loads a GLB into the model pool; returns a non-owning pointer or nullptr on failure.
@@ -54,6 +54,8 @@ private:
 
     // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
     std::vector<std::unique_ptr<engine::RiggedModel>> models_;
+
+    std::vector<game::Zombie> zombies_;
 
     // --- player (singleton, not an entity) ---
     FpsCamera             camera_{};

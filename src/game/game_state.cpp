@@ -4,11 +4,12 @@
 #include "engine/geometry/primitives.hpp"
 #include "engine/hud.hpp"
 #include "engine/lit_vertex.hpp"
+#include "engine/log.hpp"
 #include "engine/physics/raycast.hpp"
 #include "engine/render/buffers.hpp"
-#include "engine/log.hpp"
 #include "engine/shader_program.hpp"
 #include "engine/texture_loader.hpp"
+#include "game/components.hpp"
 #include "game/level/level_loader.hpp"
 #include "game/level/level_mesh.hpp"
 
@@ -208,7 +209,7 @@ bool GameState::init(const char *level_path, int width, int height) {
   }
 
   // Spawn initial entities
-  spawn_zombie(20.0f, 0.0f, 20.0f);
+  spawn_zombie(10.0f, 0.0f, 20.0f);
   spawn_zombie(4.0f, 0.0f, 7.0f);
   spawn_target(3.0f, 0.4f, 5.0f);
   spawn_target(4.0f, 0.4f, 5.5f);
@@ -292,29 +293,13 @@ engine::RiggedModel *GameState::load_model(const char *path, std::string &err) {
   return models_.back().get();
 }
 
-entt::entity GameState::spawn_zombie(float x, float y, float z) {
+void GameState::spawn_zombie(float x, float y, float z) {
   std::string err;
   engine::RiggedModel *m =
       load_model(ENGINE_MODELS_DIR "/ZombieCity01_Shirt.glb", err);
   if (!m)
     LOG_WARN("zombie model: %s", err.c_str());
-
-  auto e = registry_.create();
-  auto &tr = registry_.emplace<game::TransformC>(e);
-  tr.x = x;
-  tr.y = y;
-  tr.z = z;
-  tr.yaw = 0.f;
-  registry_.emplace<game::HealthC>(e);
-  registry_.emplace<game::ZombieAIC>(e);
-  auto &sm = registry_.emplace<game::SkinnedModelC>(e);
-  sm.model = m;
-  if (m) {
-    sm.anim.bind(*m);
-    sm.anim.play(*m, game::ZombieAnim::Idle, true, true);
-  }
-  registry_.emplace<game::ZombieTag>(e);
-  return e;
+  zombies_.emplace_back(x, y, z, m);
 }
 
 entt::entity GameState::spawn_target(float x, float y, float z) {
@@ -466,29 +451,18 @@ void GameState::sys_shooting() {
   }
 
   // Zombies: test capsule, only if closer than wall/target.
-  for (auto entity : registry_.view<game::ZombieTag>()) {
-    auto &tr = registry_.get<game::TransformC>(entity);
-    auto &hp = registry_.get<game::HealthC>(entity);
-    auto &ai = registry_.get<game::ZombieAIC>(entity);
-    auto &sm = registry_.get<game::SkinnedModelC>(entity);
-    if (!hp.alive() || !sm.model)
+  for (auto &z : zombies_) {
+    if (!z.alive())
       continue;
-
-    const float ca[3] = {tr.x, tr.y + game::ZombieAIC::k_radius, tr.z};
-    const float cb[3] = {
-        tr.x, tr.y + game::ZombieAIC::k_height - game::ZombieAIC::k_radius,
-        tr.z};
+    float ca[3], cb[3];
+    z.capsule(ca, cb);
     float t_hit;
     if (engine::ray_capsule(camera_.eyeX, camera_.eyeY, camera_.eyeZ, fx, fy,
                             fz, ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
-                            game::ZombieAIC::k_radius, t_hit) &&
+                            game::Zombie::k_radius, t_hit) &&
         t_hit < best_t) {
       best_t = t_hit;
-      hp.hp -= 10;
-      if (hp.alive() && std::rand() % 2 == 0) {
-        sm.anim.play(*sm.model, game::ZombieAnim::GetHit, false, true);
-        ai.hit_stun_timer = 0.5f;
-      }
+      z.take_damage(10);
     }
   }
 
@@ -532,84 +506,8 @@ void GameState::sys_viewmodel_anim(float dt) {
 // --- system: zombie AI ---
 
 void GameState::sys_zombie_ai(float dt) {
-  constexpr float k_walk_speed = 1.5f;
-  constexpr float k_engage_dist = 1.2f;
-  constexpr float k_damage_interval = 1.0f;
-  constexpr int k_damage_per_hit = 10;
-  constexpr float k_min_sep =
-      game::ZombieAIC::k_radius + engine::PlayerPhysics::k_body_radius_xz;
-
-  for (auto entity : registry_.view<game::ZombieTag>()) {
-    auto &tr = registry_.get<game::TransformC>(entity);
-    auto &hp = registry_.get<game::HealthC>(entity);
-    auto &ai = registry_.get<game::ZombieAIC>(entity);
-    auto &sm = registry_.get<game::SkinnedModelC>(entity);
-
-    if (!sm.model)
-      continue;
-    auto &model = *sm.model;
-    if (!model.valid())
-      continue;
-
-    if (!hp.alive()) {
-      if (!ai.dying) {
-        ai.dying = true;
-        sm.anim.play(model, game::ZombieAnim::Death, false, true);
-      }
-      model.update(dt);
-      continue;
-    }
-
-    const float pdx = camera_.eyeX - tr.x;
-    const float pdz = camera_.eyeZ - tr.z;
-    const float dist_xz = std::sqrt(pdx * pdx + pdz * pdz);
-
-    tr.yaw = std::atan2(-pdx, pdz);
-
-    if (ai.hit_stun_timer > 0.f) {
-      ai.hit_stun_timer -= dt;
-      if (ai.hit_stun_timer < 0.f)
-        ai.hit_stun_timer = 0.f;
-    } else if (dist_xz > k_engage_dist) {
-      ai.damage_timer = 0.f;
-      const float inv = 1.0f / dist_xz;
-      const float cand_x = tr.x + pdx * inv * k_walk_speed * dt;
-      const float cand_z = tr.z + pdz * inv * k_walk_speed * dt;
-      engine::resolve_xz_slide(level_, tr.x, tr.z, cand_x, cand_z, tr.y,
-                               game::ZombieAIC::k_radius,
-                               engine::PlayerPhysics::k_step_up, tr.x, tr.z);
-      sm.anim.play(model, game::ZombieAnim::Walk, true, false);
-    } else {
-      ai.damage_timer += dt;
-      if (ai.damage_timer >= k_damage_interval) {
-        ai.damage_timer -= k_damage_interval;
-        player_health_ = std::max(0, player_health_ - k_damage_per_hit);
-      }
-      if (sm.anim.current_z(model) != game::ZombieAnim::Attack ||
-          model.current_finished()) {
-        sm.anim.play_random(model, game::ZombieAnim::Attack, false);
-      }
-    }
-
-    // Push overlapping bodies apart.
-    const float sep_dx = tr.x - camera_.eyeX;
-    const float sep_dz = tr.z - camera_.eyeZ;
-    const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
-    if (sep_dist > 0.f && sep_dist < k_min_sep) {
-      const float half_push = 0.5f * (k_min_sep - sep_dist) / sep_dist;
-      const float prev_zx = tr.x;
-      const float prev_zz = tr.z;
-      tr.x += sep_dx * half_push;
-      tr.z += sep_dz * half_push;
-      camera_.eyeX -= sep_dx * half_push;
-      camera_.eyeZ -= sep_dz * half_push;
-      engine::resolve_xz_slide(level_, prev_zx, prev_zz, tr.x, tr.z, tr.y,
-                               game::ZombieAIC::k_radius,
-                               engine::PlayerPhysics::k_step_up, tr.x, tr.z);
-    }
-
-    model.update(dt);
-  }
+  for (auto &z : zombies_)
+    z.update(dt, camera_, player_health_, level_);
 }
 
 // ============================================================
@@ -757,20 +655,9 @@ void GameState::sys_render_characters() {
   }
 
   // World-space characters (zombies)
-  for (auto entity : registry_.view<game::ZombieTag>()) {
-    const auto &tr = registry_.get<game::TransformC>(entity);
-    const auto &sm = registry_.get<game::SkinnedModelC>(entity);
-    if (!sm.model || !sm.model->valid())
-      continue;
-    engine::CharacterDrawParams cdp{};
-    cdp.pos[0] = tr.x;
-    cdp.pos[1] = tr.y;
-    cdp.pos[2] = tr.z;
-    cdp.yaw = tr.yaw;
-    cdp.scale = 1.f;
-    sm.model->submit_world(0, skinned_program_, u_bones_, s_albedo_,
-                           u_baseColor_, white_tex_, render_state_, cdp);
-  }
+  for (const auto &z : zombies_)
+    z.render(0, skinned_program_, u_bones_, s_albedo_, u_baseColor_, white_tex_,
+             render_state_);
 }
 
 void GameState::sys_render_hud() {
