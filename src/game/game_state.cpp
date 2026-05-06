@@ -320,6 +320,7 @@ void GameState::update(float dt) {
   player_.update(dt, level_);
   sys_shooting();
   sys_zombie_ai(dt);
+  particles_.update(dt);
 }
 
 // --- system: shoot ---
@@ -367,6 +368,11 @@ void GameState::sys_shooting() {
         t_hit < best_t) {
       best_t = t_hit;
       z.take_damage(10);
+      particles_.spawn(
+          cam.eyeX + fx * t_hit,
+          cam.eyeY + fy * t_hit,
+          cam.eyeZ + fz * t_hit,
+          25);
     }
   }
 }
@@ -400,6 +406,7 @@ void GameState::render(int width, int height) {
   sys_render_level();
   sys_render_targets();
   sys_render_characters();
+  particles_.render(0, debug_program_);
   if (show_collision_)
     sys_render_collision_debug();
   sys_render_hud();

@@ -100,6 +100,7 @@ add_executable(fps_engine
   src/game/animator.cpp
   src/game/player.cpp
   src/game/zombie.cpp
+  src/game/particles.cpp
   src/engine/window.cpp
   src/engine/hud.cpp
   shaders/vs_triangle.sc

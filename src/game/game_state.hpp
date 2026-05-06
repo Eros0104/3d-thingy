@@ -4,6 +4,7 @@
 #include "game/level/level_data.hpp"
 #include "game/player.hpp"
 #include "game/target.hpp"
+#include "game/particles.hpp"
 #include "game/zombie.hpp"
 
 #include <SDL.h>
@@ -49,9 +50,10 @@ private:
     // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
     std::vector<std::unique_ptr<engine::RiggedModel>> models_;
 
-    game::Player              player_;
-    std::vector<game::Zombie>  zombies_;
-    std::vector<game::Target>  targets_;
+    game::Player                  player_;
+    std::vector<game::Zombie>     zombies_;
+    std::vector<game::Target>     targets_;
+    game::BloodParticleSystem     particles_;
 
     // --- level ---
     engine::Level level_{};
