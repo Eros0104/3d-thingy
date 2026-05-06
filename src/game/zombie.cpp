@@ -29,8 +29,7 @@ void Zombie::take_damage(int amount) {
 }
 
 void Zombie::capsule(float out_a[3], float out_b[3]) const {
-    out_a[0] = x; out_a[1] = y + k_radius;             out_a[2] = z;
-    out_b[0] = x; out_b[1] = y + k_height - k_radius;  out_b[2] = z;
+    k_collider.capsule_endpoints(x, y, z, out_a, out_b);
 }
 
 void Zombie::update(float dt, game::Player& player, const engine::Level& level) {
@@ -40,7 +39,7 @@ void Zombie::update(float dt, game::Player& player, const engine::Level& level) 
     constexpr float k_engage_dist     = 1.2f;
     constexpr float k_damage_interval = 1.0f;
     constexpr int   k_damage_per_hit  = 10;
-    constexpr float k_min_sep         = k_radius + engine::PlayerPhysics::k_body_radius_xz;
+    const float k_min_sep              = k_collider.radius + engine::PlayerPhysics::k_body_radius_xz;
 
     if (!alive()) {
         if (!dying_) {
@@ -68,7 +67,7 @@ void Zombie::update(float dt, game::Player& player, const engine::Level& level) 
         const float cand_x = x + pdx * inv * k_walk_speed * dt;
         const float cand_z = z + pdz * inv * k_walk_speed * dt;
         engine::resolve_xz_slide(level, x, z, cand_x, cand_z, y,
-                                 k_radius, engine::PlayerPhysics::k_step_up, x, z);
+                                 k_collider.radius, k_collider.step_up, x, z);
         anim_.play(*model_, ZombieAnim::Walk, true, false);
     } else {
         damage_timer_ += dt;
@@ -92,7 +91,7 @@ void Zombie::update(float dt, game::Player& player, const engine::Level& level) 
         camera.eyeX -= sep_dx * half_push;
         camera.eyeZ -= sep_dz * half_push;
         engine::resolve_xz_slide(level, prev_x, prev_z, x, z, y,
-                                 k_radius, engine::PlayerPhysics::k_step_up, x, z);
+                                 k_collider.radius, k_collider.step_up, x, z);
     }
 
     model_->update(dt);

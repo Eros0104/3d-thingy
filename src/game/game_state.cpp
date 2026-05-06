@@ -308,6 +308,8 @@ void GameState::on_resize(int width, int height) {
 
 void GameState::handle_event(const SDL_Event &event) {
   player_.handle_event(event);
+  if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c && !event.key.repeat)
+    show_collision_ = !show_collision_;
 }
 
 // ============================================================
@@ -361,7 +363,7 @@ void GameState::sys_shooting() {
     float t_hit;
     if (engine::ray_capsule(cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz,
                             ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
-                            game::Zombie::k_radius, t_hit) &&
+                            game::Zombie::k_collider.radius, t_hit) &&
         t_hit < best_t) {
       best_t = t_hit;
       z.take_damage(10);
@@ -398,6 +400,8 @@ void GameState::render(int width, int height) {
   sys_render_level();
   sys_render_targets();
   sys_render_characters();
+  if (show_collision_)
+    sys_render_collision_debug();
   sys_render_hud();
   sys_render_debug_text();
 }
@@ -510,6 +514,112 @@ void GameState::sys_render_characters() {
              render_state_);
 }
 
+namespace {
+
+void draw_capsule_wireframe(
+    bgfx::ViewId view_id, bgfx::ProgramHandle prog,
+    float cx, float feet_y, float cz,
+    float radius, float height,
+    uint32_t abgr)
+{
+  if (!bgfx::isValid(prog)) return;
+
+  // N segments per full circle; N/2 per hemisphere arc.
+  // Layout: 2 equatorial circles + 4 vertical shaft lines + 4 hemisphere arcs (2 per end).
+  constexpr int N = 16;
+  constexpr int n_verts = N*2*2 + 4*2 + 4*(N/2)*2;
+
+  bgfx::VertexLayout layout;
+  layout.begin()
+      .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+      .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+      .end();
+
+  if (bgfx::getAvailTransientVertexBuffer(n_verts, layout) < n_verts) return;
+
+  bgfx::TransientVertexBuffer tvb;
+  bgfx::allocTransientVertexBuffer(&tvb, n_verts, layout);
+
+  struct V { float x, y, z; uint32_t abgr; };
+  V* v = reinterpret_cast<V*>(tvb.data);
+  int idx = 0;
+
+  // Hemisphere sphere-centers: not the pole tips, but the equatorial ring positions.
+  const float bottom_y = feet_y + radius;          // center of bottom hemisphere
+  const float top_y    = feet_y + height - radius; // center of top hemisphere
+  constexpr float k_2pi = 6.28318530717958647692f;
+  constexpr float k_pi  = 3.14159265358979323846f;
+
+  // Equatorial circles at hemisphere centers (the widest cross-section of each cap).
+  auto circle = [&](float ring_y) {
+    for (int i = 0; i < N; ++i) {
+      const float a0 = float(i)   / N * k_2pi;
+      const float a1 = float(i+1) / N * k_2pi;
+      v[idx++] = { cx + radius*std::cos(a0), ring_y, cz + radius*std::sin(a0), abgr };
+      v[idx++] = { cx + radius*std::cos(a1), ring_y, cz + radius*std::sin(a1), abgr };
+    }
+  };
+  circle(bottom_y);
+  circle(top_y);
+
+  // Four vertical shaft lines connecting the two equatorial rings.
+  const float offsets[4][2] = {{radius,0},{-radius,0},{0,radius},{0,-radius}};
+  for (auto& o : offsets) {
+    v[idx++] = { cx + o[0], bottom_y, cz + o[1], abgr };
+    v[idx++] = { cx + o[0], top_y,    cz + o[1], abgr };
+  }
+
+  // Hemisphere arcs in two perpendicular planes (XY and ZY) at each end.
+  // Bottom: sweeps θ from 0 → -π (downward from equatorial ring to pole).
+  // Top:    sweeps θ from 0 → +π (upward from equatorial ring to pole).
+  auto hemi_arc = [&](float center_y, float theta_start, float theta_end, bool z_axis) {
+    for (int i = 0; i < N/2; ++i) {
+      const float a0 = theta_start + float(i)   / float(N/2) * (theta_end - theta_start);
+      const float a1 = theta_start + float(i+1) / float(N/2) * (theta_end - theta_start);
+      const float y0 = center_y + radius * std::sin(a0);
+      const float y1 = center_y + radius * std::sin(a1);
+      if (!z_axis) {
+        v[idx++] = { cx + radius*std::cos(a0), y0, cz, abgr };
+        v[idx++] = { cx + radius*std::cos(a1), y1, cz, abgr };
+      } else {
+        v[idx++] = { cx, y0, cz + radius*std::cos(a0), abgr };
+        v[idx++] = { cx, y1, cz + radius*std::cos(a1), abgr };
+      }
+    }
+  };
+  hemi_arc(bottom_y,  0.f, -k_pi, false);
+  hemi_arc(bottom_y,  0.f, -k_pi, true);
+  hemi_arc(top_y,     0.f,  k_pi, false);
+  hemi_arc(top_y,     0.f,  k_pi, true);
+
+  float mtx[16];
+  bx::mtxIdentity(mtx);
+  bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                 BGFX_STATE_PT_LINES  | BGFX_STATE_DEPTH_TEST_LESS);
+  bgfx::setTransform(mtx);
+  bgfx::setVertexBuffer(0, &tvb);
+  bgfx::submit(view_id, prog);
+}
+
+} // namespace
+
+void GameState::sys_render_collision_debug() {
+  if (!bgfx::isValid(debug_program_)) return;
+
+  const FpsCamera& cam = player_.camera();
+  const engine::Collider& pc = player_.collider();
+  draw_capsule_wireframe(0, debug_program_,
+                         cam.eyeX, cam.eyeY - pc.height, cam.eyeZ,
+                         pc.radius, pc.height, 0xff44ff44u);
+
+  for (const auto& z : zombies_) {
+    const engine::Collider& zc = z.collider();
+    draw_capsule_wireframe(0, debug_program_,
+                           z.x, z.y, z.z,
+                           zc.radius, zc.height, 0xff4444ffu);
+  }
+}
+
 void GameState::sys_render_hud() {
   if (!hud_ok_)
     return;
@@ -541,9 +651,10 @@ void GameState::sys_render_hud() {
 void GameState::sys_render_debug_text() {
   bgfx::dbgTextClear();
   bgfx::dbgTextPrintf(
-      0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   LMB:Shoot R:Reload",
+      0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   LMB:Shoot R:Reload",
       player_.mouse_look() ? "free cursor" : "capture",
-      player_.show_axes_gizmo() ? "on" : "off");
+      player_.show_axes_gizmo() ? "on" : "off",
+      show_collision_ ? "on" : "off");
   bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
                       level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
                       level_.sectors.size(), level_.walls.size(),

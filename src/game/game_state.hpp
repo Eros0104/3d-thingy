@@ -42,6 +42,7 @@ private:
     void sys_render_level();
     void sys_render_targets();
     void sys_render_characters();
+    void sys_render_collision_debug();
     void sys_render_hud();
     void sys_render_debug_text();
 
@@ -84,8 +85,9 @@ private:
     bgfx::TextureHandle floor_tex_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle wall_tex_  = BGFX_INVALID_HANDLE;
 
-    bool     hud_ok_       = false;
-    uint64_t render_state_ = 0;
-    int      width_        = 1280;
-    int      height_       = 720;
+    bool     hud_ok_            = false;
+    bool     show_collision_    = false;
+    uint64_t render_state_      = 0;
+    int      width_             = 1280;
+    int      height_            = 720;
 };

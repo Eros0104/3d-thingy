@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/collider.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/animator.hpp"
 
@@ -13,8 +14,7 @@ class Player;
 
 class Zombie {
 public:
-    static constexpr float k_radius = 0.35f;
-    static constexpr float k_height = 1.8f;
+    static constexpr engine::Collider k_collider{0.35f, 1.8f, 1.0f};
 
     Zombie(float x, float y, float z, engine::RiggedModel* model);
 
@@ -33,6 +33,8 @@ public:
     void take_damage(int amount);
 
     bool alive() const { return hp_ > 0; }
+
+    const engine::Collider& collider() const { return k_collider; }
 
     // Capsule segment endpoints for raycasting.
     void capsule(float out_a[3], float out_b[3]) const;

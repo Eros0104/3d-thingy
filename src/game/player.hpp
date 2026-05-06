@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/audio.hpp"
+#include "engine/collider.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/animator.hpp"
 #include "game/fps_camera.hpp"
@@ -50,11 +51,18 @@ public:
     bool mouse_look()      const { return mouse_look_; }
     bool show_axes_gizmo() const { return show_axes_gizmo_; }
 
+    const engine::Collider& collider() const { return collider_; }
+
 private:
     void update_viewmodel_anim(float dt);
 
     FpsCamera             camera_{};
     engine::PlayerPhysics physics_{};
+    engine::Collider      collider_{
+        engine::PlayerPhysics::k_body_radius_xz,
+        engine::PlayerPhysics::k_eye_height,
+        engine::PlayerPhysics::k_step_up
+    };
 
     int  health_          = 100;
     int  bullets_in_clip_ = 8;
