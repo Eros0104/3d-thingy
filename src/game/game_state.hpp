@@ -3,11 +3,11 @@
 #include "engine/rigged_model.hpp"
 #include "game/level/level_data.hpp"
 #include "game/player.hpp"
+#include "game/target.hpp"
 #include "game/zombie.hpp"
 
 #include <SDL.h>
 #include <bgfx/bgfx.h>
-#include <entt/entt.hpp>
 
 #include <memory>
 #include <string>
@@ -31,7 +31,7 @@ public:
 
 private:
     void spawn_zombie(float x, float y, float z);
-    entt::entity spawn_target(float x, float y, float z);
+    void spawn_target(float x, float y, float z);
 
     // Loads a GLB into the model pool; returns a non-owning pointer or nullptr on failure.
     engine::RiggedModel* load_model(const char* path, std::string& err);
@@ -45,21 +45,18 @@ private:
     void sys_render_hud();
     void sys_render_debug_text();
 
-    // --- ECS (targets only for now) ---
-    entt::registry registry_;
-
     // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
     std::vector<std::unique_ptr<engine::RiggedModel>> models_;
 
-    game::Player         player_;
-    std::vector<game::Zombie> zombies_;
+    game::Player              player_;
+    std::vector<game::Zombie>  zombies_;
+    std::vector<game::Target>  targets_;
 
     // --- level ---
     engine::Level level_{};
 
     // --- bgfx resources ---
     static constexpr int k_max_shader_lights = 8;
-    static constexpr int k_target_max_hits   = 3;
 
     bgfx::VertexLayout       layout_{};
     bgfx::VertexBufferHandle floor_vbh_  = BGFX_INVALID_HANDLE;
@@ -67,7 +64,7 @@ private:
     bgfx::VertexBufferHandle stair_vbh_  = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle bulb_vbh_   = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle  bulb_ibh_   = BGFX_INVALID_HANDLE;
-    bgfx::VertexBufferHandle cube_vbh_[k_target_max_hits]{};
+    bgfx::VertexBufferHandle cube_vbh_[game::Target::k_max_hits]{};
     bgfx::IndexBufferHandle  cube_ibh_   = BGFX_INVALID_HANDLE;
 
     bgfx::ProgramHandle program_         = BGFX_INVALID_HANDLE;

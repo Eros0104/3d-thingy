@@ -76,13 +76,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-FetchContent_Declare(
-  EnTT
-  GIT_REPOSITORY https://github.com/skypjack/entt.git
-  GIT_TAG v3.13.2
-)
-FetchContent_MakeAvailable(EnTT)
-
 set(SHADER_GEN_DIR "${CMAKE_BINARY_DIR}/generated/shaders")
 
 add_executable(fps_engine
@@ -142,7 +135,6 @@ target_link_libraries(fps_engine PRIVATE
   bimg
   bimg_decode
   nlohmann_json::nlohmann_json
-  EnTT::EnTT
 )
 
 add_executable(level_pack

@@ -9,7 +9,6 @@
 #include "engine/render/buffers.hpp"
 #include "engine/shader_program.hpp"
 #include "engine/texture_loader.hpp"
-#include "game/components.hpp"
 #include "game/level/level_loader.hpp"
 #include "game/level/level_mesh.hpp"
 
@@ -160,14 +159,14 @@ bool GameState::init(const char *level_path, int width, int height) {
 
   // Target cube VBHs (one per damage tint, shared IB)
   {
-    constexpr uint32_t tints[k_target_max_hits] = {
+    constexpr uint32_t tints[game::Target::k_max_hits] = {
         0xff5050ffu,
         0xff3030c0u,
         0xff1a1a80u,
     };
     std::vector<LitVertex> verts;
     std::vector<uint16_t> indices;
-    for (int t = 0; t < k_target_max_hits; ++t) {
+    for (int t = 0; t < game::Target::k_max_hits; ++t) {
       engine::build_unit_cube(verts, indices, 0.4f, tints[t]);
       cube_vbh_[t] = bgfx::createVertexBuffer(
           bgfx::copy(verts.data(), uint32_t(verts.size() * sizeof(LitVertex))),
@@ -251,7 +250,7 @@ void GameState::shutdown() {
   dvb(stair_vbh_);
   dvb(bulb_vbh_);
   dib(bulb_ibh_);
-  for (int t = 0; t < k_target_max_hits; ++t)
+  for (int t = 0; t < game::Target::k_max_hits; ++t)
     dvb(cube_vbh_[t]);
   dib(cube_ibh_);
 
@@ -294,16 +293,8 @@ void GameState::spawn_zombie(float x, float y, float z) {
   zombies_.emplace_back(x, y, z, m);
 }
 
-entt::entity GameState::spawn_target(float x, float y, float z) {
-  auto e = registry_.create();
-  auto &tr = registry_.emplace<game::TransformC>(e);
-  tr.x = x;
-  tr.y = y;
-  tr.z = z;
-  tr.yaw = 0.f;
-  registry_.emplace<game::TargetC>(e);
-  registry_.emplace<game::TargetTag>(e);
-  return e;
+void GameState::spawn_target(float x, float y, float z) {
+  targets_.push_back(game::Target{.x = x, .y = y, .z = z});
 }
 
 // ============================================================
@@ -343,27 +334,22 @@ void GameState::sys_shooting() {
 
   // Targets: find closest, damage it.
   {
-    entt::entity best_e = entt::null;
-    for (auto entity : registry_.view<game::TargetTag>()) {
-      auto &tgt = registry_.get<game::TargetC>(entity);
-      auto &tr = registry_.get<game::TransformC>(entity);
+    game::Target *best = nullptr;
+    for (auto &tgt : targets_) {
       if (!tgt.alive)
         continue;
       const float h = tgt.half_extent;
       float t_hit;
       if (engine::ray_aabb(cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz,
-                           tr.x - h, tr.y - h, tr.z - h, tr.x + h, tr.y + h,
-                           tr.z + h, t_hit) &&
+                           tgt.x - h, tgt.y - h, tgt.z - h,
+                           tgt.x + h, tgt.y + h, tgt.z + h, t_hit) &&
           t_hit < best_t) {
         best_t = t_hit;
-        best_e = entity;
+        best   = &tgt;
       }
     }
-    if (best_e != entt::null) {
-      auto &tgt = registry_.get<game::TargetC>(best_e);
-      if (--tgt.hits_remaining <= 0)
-        tgt.alive = false;
-    }
+    if (best)
+      best->take_hit();
   }
 
   // Zombies: capsule test, only if closer than wall/target.
@@ -494,15 +480,13 @@ void GameState::sys_render_level() {
 
 void GameState::sys_render_targets() {
   float mtx[16];
-  for (auto entity : registry_.view<game::TargetTag>()) {
-    const auto &tgt = registry_.get<game::TargetC>(entity);
-    const auto &tr = registry_.get<game::TransformC>(entity);
+  for (const auto &tgt : targets_) {
     if (!tgt.alive)
       continue;
-    const int tint = std::clamp(k_target_max_hits - tgt.hits_remaining, 0,
-                                k_target_max_hits - 1);
+    const int tint = std::clamp(game::Target::k_max_hits - tgt.hits_remaining,
+                                0, game::Target::k_max_hits - 1);
     bgfx::setState(render_state_);
-    bx::mtxTranslate(mtx, tr.x, tr.y, tr.z);
+    bx::mtxTranslate(mtx, tgt.x, tgt.y, tgt.z);
     bgfx::setTransform(mtx);
     bgfx::setTexture(0, s_albedo_, white_tex_);
     bgfx::setVertexBuffer(0, cube_vbh_[tint]);
