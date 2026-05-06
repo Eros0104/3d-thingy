@@ -43,9 +43,12 @@ private:
     void sys_render_level();
     void sys_render_targets();
     void sys_render_characters();
+    void sys_render_bullet_holes();
     void sys_render_collision_debug();
     void sys_render_hud();
     void sys_render_debug_text();
+
+    struct BulletHole { float x, y, z, nx, nz; };
 
     // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
     std::vector<std::unique_ptr<engine::RiggedModel>> models_;
@@ -54,6 +57,7 @@ private:
     std::vector<game::Zombie>     zombies_;
     std::vector<game::Target>     targets_;
     game::BloodParticleSystem     particles_;
+    std::vector<BulletHole>       bullet_holes_;
 
     // --- level ---
     engine::Level level_{};
@@ -83,9 +87,10 @@ private:
     bgfx::UniformHandle u_bones_        = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_baseColor_    = BGFX_INVALID_HANDLE;
 
-    bgfx::TextureHandle white_tex_ = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle floor_tex_ = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle wall_tex_  = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle white_tex_       = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle floor_tex_       = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle wall_tex_        = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle bullet_hole_tex_ = BGFX_INVALID_HANDLE;
 
     bool     hud_ok_            = false;
     bool     show_collision_    = false;

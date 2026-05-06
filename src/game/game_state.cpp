@@ -144,6 +144,8 @@ bool GameState::init(const char *level_path, int width, int height) {
       ENGINE_TEXTURES_DIR "/checkered_pavement_tiles_diff_2k.jpg");
   wall_tex_ = engine::load_texture_from_file(ENGINE_TEXTURES_DIR
                                              "/plastered_wall_04_diff_2k.jpg");
+  bullet_hole_tex_ = engine::load_texture_from_file(
+      ENGINE_TEXTURES_DIR "/bullet_hole.png");
 
   // Light bulb sphere
   {
@@ -257,6 +259,7 @@ void GameState::shutdown() {
   dth(floor_tex_);
   dth(wall_tex_);
   dth(white_tex_);
+  dth(bullet_hole_tex_);
 
   duh(u_light_pos_);
   duh(u_light_color_);
@@ -332,8 +335,10 @@ void GameState::sys_shooting() {
 
   const FpsCamera &cam = player_.camera();
   float best_t = std::numeric_limits<float>::infinity();
-  engine::ray_walls_nearest(level_.walls, cam.eyeX, cam.eyeY, cam.eyeZ,
-                            fx, fy, fz, best_t);
+  float wall_nx = 0.f, wall_nz = 0.f, wall_thick = 0.f;
+  const bool wall_hit = engine::ray_walls_nearest_ex(level_.walls,
+      cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz, best_t, wall_nx, wall_nz, wall_thick);
+  const float wall_t = best_t;
 
   // Targets: find closest, damage it.
   {
@@ -375,6 +380,19 @@ void GameState::sys_shooting() {
           25);
     }
   }
+
+  // Bullet hole on wall if no closer hit was recorded.
+  if (wall_hit && best_t >= wall_t - 1e-4f) {
+    const float k_offset = wall_thick * 0.5f + 0.005f;
+    constexpr int k_max  = 200;
+    bullet_holes_.push_back({
+        cam.eyeX + fx * wall_t + wall_nx * k_offset,
+        cam.eyeY + fy * wall_t,
+        cam.eyeZ + fz * wall_t + wall_nz * k_offset,
+        wall_nx, wall_nz});
+    if (int(bullet_holes_.size()) > k_max)
+      bullet_holes_.erase(bullet_holes_.begin());
+  }
 }
 
 // --- system: zombie AI ---
@@ -405,6 +423,7 @@ void GameState::render(int width, int height) {
   sys_set_lights();
   sys_render_level();
   sys_render_targets();
+  sys_render_bullet_holes();
   sys_render_characters();
   particles_.render(0, debug_program_);
   if (show_collision_)
@@ -519,6 +538,59 @@ void GameState::sys_render_characters() {
   for (const auto &z : zombies_)
     z.render(0, skinned_program_, u_bones_, s_albedo_, u_baseColor_, white_tex_,
              render_state_);
+}
+
+void GameState::sys_render_bullet_holes() {
+  if (bullet_holes_.empty() || !bgfx::isValid(program_)) return;
+
+  const uint32_t n         = uint32_t(bullet_holes_.size());
+  const uint32_t n_verts   = n * 4;
+  const uint32_t n_indices = n * 6;
+  if (bgfx::getAvailTransientVertexBuffer(n_verts, layout_) < n_verts) return;
+  if (bgfx::getAvailTransientIndexBuffer(n_indices) < n_indices)       return;
+
+  bgfx::TransientVertexBuffer tvb;
+  bgfx::TransientIndexBuffer  tib;
+  bgfx::allocTransientVertexBuffer(&tvb, n_verts, layout_);
+  bgfx::allocTransientIndexBuffer(&tib, n_indices);
+
+  LitVertex*  vp = reinterpret_cast<LitVertex*>(tvb.data);
+  uint16_t*   ip = reinterpret_cast<uint16_t*>(tib.data);
+
+  constexpr float k_hs = 0.08f; // half-size in metres
+
+  for (uint32_t i = 0; i < n; ++i) {
+    const BulletHole& h = bullet_holes_[i];
+    // Right vector: perpendicular to wall normal in XZ; Up: world Y.
+    const float rx = h.nz, rz = -h.nx;
+
+    auto vert = [&](float px, float py, float pz, float u, float v) -> LitVertex {
+      return { px, py, pz, h.nx, 0.f, h.nz, u, v, 0xffffffff };
+    };
+    vp[i*4+0] = vert(h.x - rx*k_hs, h.y + k_hs, h.z - rz*k_hs, 0.f, 0.f);
+    vp[i*4+1] = vert(h.x + rx*k_hs, h.y + k_hs, h.z + rz*k_hs, 1.f, 0.f);
+    vp[i*4+2] = vert(h.x + rx*k_hs, h.y - k_hs, h.z + rz*k_hs, 1.f, 1.f);
+    vp[i*4+3] = vert(h.x - rx*k_hs, h.y - k_hs, h.z - rz*k_hs, 0.f, 1.f);
+
+    const uint16_t b = uint16_t(i * 4);
+    ip[i*6+0] = b+0; ip[i*6+1] = b+1; ip[i*6+2] = b+2;
+    ip[i*6+3] = b+0; ip[i*6+4] = b+2; ip[i*6+5] = b+3;
+  }
+
+  const bgfx::TextureHandle tex =
+      bgfx::isValid(bullet_hole_tex_) ? bullet_hole_tex_ : white_tex_;
+
+  float mtx[16];
+  bx::mtxIdentity(mtx);
+  const uint64_t blend = BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA,
+                                               BGFX_STATE_BLEND_INV_SRC_ALPHA);
+  bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                 BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_MSAA | blend);
+  bgfx::setTransform(mtx);
+  bgfx::setTexture(0, s_albedo_, tex);
+  bgfx::setVertexBuffer(0, &tvb);
+  bgfx::setIndexBuffer(&tib);
+  bgfx::submit(0, program_);
 }
 
 namespace {

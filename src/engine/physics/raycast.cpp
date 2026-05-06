@@ -71,6 +71,43 @@ bool ray_walls_nearest(const std::vector<Wall> &walls, float ox, float oy, float
 }
 
 
+bool ray_walls_nearest_ex(const std::vector<Wall> &walls, float ox, float oy, float oz,
+                          float dx, float dy, float dz,
+                          float &t_hit, float &norm_x, float &norm_z, float &thickness) {
+  bool any = false;
+  float best_t = std::numeric_limits<float>::infinity();
+  float best_nx = 0.f, best_nz = 0.f, best_thick = 0.f;
+  for (const Wall &w : walls) {
+    const float bxx = w.b.x - w.a.x;
+    const float bzz = w.b.z - w.a.z;
+    const float det = dx * bzz - dz * bxx;
+    if (std::fabs(det) < 1e-7f) continue;
+    const float ax_ox = w.a.x - ox;
+    const float az_oz = w.a.z - oz;
+    const float s = (-dz * (-ax_ox) + dx * (-az_oz)) / det;
+    const float t = (bxx * (-az_oz) - bzz * (-ax_ox)) / det;
+    if (t <= 0.f || s < 0.f || s > 1.f) continue;
+    const float y_at = oy + dy * t;
+    if (y_at < w.y0 || y_at > w.y1) continue;
+    if (t < best_t) {
+      best_t = t;
+      any = true;
+      float nx = -bzz, nz = bxx;
+      if (nx * (ox - w.a.x) + nz * (oz - w.a.z) < 0.f) { nx = -nx; nz = -nz; }
+      const float len = std::sqrt(nx * nx + nz * nz);
+      if (len > 1e-6f) { nx /= len; nz /= len; }
+      best_nx    = nx;
+      best_nz    = nz;
+      best_thick = w.thickness;
+    }
+  }
+  t_hit     = best_t;
+  norm_x    = best_nx;
+  norm_z    = best_nz;
+  thickness = best_thick;
+  return any;
+}
+
 bool ray_capsule(float ox, float oy, float oz,
                  float dx, float dy, float dz,
                  float ax, float ay, float az,

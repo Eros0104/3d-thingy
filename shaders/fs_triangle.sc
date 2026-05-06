@@ -32,5 +32,5 @@ void main()
 		diffuseAccum += ndl * u_lightColor[i].xyz * albedo * atten;
 	}
 
-	gl_FragColor = vec4(ambient + diffuseAccum, v_color0.w);
+	gl_FragColor = vec4(ambient + diffuseAccum, texture2D(s_albedo, v_texcoord0).a * v_color0.w);
 }

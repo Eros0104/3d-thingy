@@ -19,6 +19,12 @@ bool ray_aabb(float ox, float oy, float oz, float dx, float dy, float dz,
 bool ray_walls_nearest(const std::vector<Wall> &walls, float ox, float oy, float oz,
                        float dx, float dy, float dz, float &t_hit);
 
+// Same as ray_walls_nearest but also returns the outward unit normal (XZ only)
+// of the closest hit wall and its visual thickness.
+bool ray_walls_nearest_ex(const std::vector<Wall> &walls, float ox, float oy, float oz,
+                          float dx, float dy, float dz,
+                          float &t_hit, float &norm_x, float &norm_z, float &thickness);
+
 // Ray vs capsule defined by segment A→B and radius r.
 // Returns true and the entry distance t_hit if the ray hits in front of the origin.
 bool ray_capsule(float ox, float oy, float oz,
