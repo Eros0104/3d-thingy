@@ -330,8 +330,10 @@ bool JoltPhysics::cast_ray_level(float ox, float oy, float oz,
     static const StaticOnlyBPFilter    s_bp_filter;
     static const StaticOnlyLayerFilter s_layer_filter;
 
+    JPH::RayCastSettings ray_settings;
+    ray_settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
     impl_->physics_system.GetNarrowPhaseQuery().CastRay(
-        ray, JPH::RayCastSettings{}, collector, s_bp_filter, s_layer_filter);
+        ray, ray_settings, collector, s_bp_filter, s_layer_filter);
 
     if (!collector.HadHit()) return false;
 
