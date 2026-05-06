@@ -645,7 +645,7 @@
       "width": 2,
       "from_y": 0,
       "to_y": 3.2,
-      "steps": 8
+      "steps": 16
     }
   ],
   "lights": [
