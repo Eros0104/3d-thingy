@@ -2,27 +2,30 @@
 
 #include "engine/audio.hpp"
 #include "engine/collider.hpp"
+#include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/animator.hpp"
 #include "game/fps_camera.hpp"
-#include "game/physics_world.hpp"
 
 #include <SDL.h>
 #include <bgfx/bgfx.h>
-
-namespace engine { struct Level; }
 
 namespace game {
 
 class Player {
 public:
-    void init(float spawn_x, float spawn_y, float spawn_z, float spawn_yaw,
+    static constexpr float k_eye_height  = 1.6f;
+    static constexpr float k_radius      = 0.28f;
+    static constexpr float k_step_height = 0.4f;
+
+    void init(float spawn_x, float spawn_eye_y, float spawn_z, float spawn_yaw,
+              engine::JoltPhysics&  jolt,
               engine::RiggedModel* viewmodel,
               engine::SoundId      shot_sound,
               engine::SoundId      step_sound);
 
     void handle_event(const SDL_Event& event);
-    void update(float dt, const engine::Level& level);
+    void update(float dt, engine::JoltPhysics& jolt);
 
     // Attempt to fire. Consumes the shoot input; returns true and fills the
     // normalised ray direction if a shot actually happened.
@@ -45,24 +48,20 @@ public:
     const FpsCamera& camera()  const { return camera_; }
     FpsCamera&       camera()        { return camera_; }
 
+    engine::CharHandle jolt_handle() const { return jolt_handle_; }
+
     int  health()          const { return health_; }
     int  bullets_in_clip() const { return bullets_in_clip_; }
     int  clip_size()       const { return clip_size_; }
     bool mouse_look()      const { return mouse_look_; }
     bool show_axes_gizmo() const { return show_axes_gizmo_; }
 
-    const engine::Collider& collider() const { return collider_; }
-
 private:
     void update_viewmodel_anim(float dt);
 
-    FpsCamera             camera_{};
-    engine::PlayerPhysics physics_{};
-    engine::Collider      collider_{
-        engine::PlayerPhysics::k_body_radius_xz,
-        engine::PlayerPhysics::k_eye_height,
-        engine::PlayerPhysics::k_step_up
-    };
+    FpsCamera                 camera_{};
+    engine::CharHandle        jolt_handle_ = engine::k_invalid_char;
+    engine::CharVerticalState vert_state_{};
 
     int  health_          = 100;
     int  bullets_in_clip_ = 8;

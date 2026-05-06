@@ -1,9 +1,5 @@
 #pragma once
 
-#include "game/level/level_data.hpp"
-
-#include <vector>
-
 namespace engine {
 
 // Slab-method ray vs axis-aligned box. Returns true and the entry distance
@@ -12,18 +8,6 @@ namespace engine {
 bool ray_aabb(float ox, float oy, float oz, float dx, float dy, float dz,
               float minx, float miny, float minz, float maxx, float maxy,
               float maxz, float &t_hit);
-
-// Treats every wall as an opaque vertical quad on the XZ-plane segment a→b
-// between y0..y1. Returns the smallest positive t in front of the ray. `t_hit`
-// is only meaningful on success.
-bool ray_walls_nearest(const std::vector<Wall> &walls, float ox, float oy, float oz,
-                       float dx, float dy, float dz, float &t_hit);
-
-// Same as ray_walls_nearest but also returns the outward unit normal (XZ only)
-// of the closest hit wall and its visual thickness.
-bool ray_walls_nearest_ex(const std::vector<Wall> &walls, float ox, float oy, float oz,
-                          float dx, float dy, float dz,
-                          float &t_hit, float &norm_x, float &norm_z, float &thickness);
 
 // Ray vs capsule defined by segment A→B and radius r.
 // Returns true and the entry distance t_hit if the ray hits in front of the origin.

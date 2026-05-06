@@ -5,6 +5,7 @@
 #include "engine/hud.hpp"
 #include "engine/lit_vertex.hpp"
 #include "engine/log.hpp"
+#include "engine/physics/jolt_physics.hpp"
 #include "engine/physics/raycast.hpp"
 #include "engine/render/buffers.hpp"
 #include "engine/shader_program.hpp"
@@ -79,7 +80,16 @@ bool GameState::init(const char *level_path, int width, int height) {
     }
   }
 
-  // Level geometry
+  // Physics
+  {
+    std::string err;
+    if (!jolt_.init()) {
+      LOG_ERROR("Jolt physics init failed");
+      return false;
+    }
+  }
+
+  // Level geometry + physics mesh
   {
     engine::LevelMeshOutput meshes;
     engine::build_level_meshes(level_, meshes);
@@ -87,6 +97,8 @@ bool GameState::init(const char *level_path, int width, int height) {
       LOG_ERROR("level has no floor geometry (sectors empty?)");
       return false;
     }
+
+    jolt_.build_level(meshes);
 
     layout_.begin()
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
@@ -193,9 +205,9 @@ bool GameState::init(const char *level_path, int width, int height) {
       LOG_WARN("viewmodel: %s", err.c_str());
     const float spawn_yaw = level_.spawn.yaw_deg * (bx::kPi / 180.0f);
     const float spawn_y =
-        level_.spawn.pos.y + engine::PlayerPhysics::k_eye_height + 0.02f;
+        level_.spawn.pos.y + game::Player::k_eye_height + 0.02f;
     player_.init(level_.spawn.pos.x, spawn_y, level_.spawn.pos.z, spawn_yaw,
-                 vm, shot_sound, step_sound);
+                 jolt_, vm, shot_sound, step_sound);
   }
 
   if (SDL_SetRelativeMouseMode(SDL_TRUE) != 0)
@@ -204,6 +216,8 @@ bool GameState::init(const char *level_path, int width, int height) {
   // Spawn initial entities
   spawn_zombie(10.0f, 0.0f, 20.0f);
   spawn_zombie(4.0f, 0.0f, 7.0f);
+  for (auto& z : zombies_)
+    z.init_jolt(jolt_);
   spawn_target(3.0f, 0.4f, 5.0f);
   spawn_target(4.0f, 0.4f, 5.5f);
   spawn_target(5.0f, 0.4f, 5.0f);
@@ -221,6 +235,7 @@ void GameState::shutdown() {
 
   engine::audio_shutdown();
   engine::hud_shutdown();
+  jolt_.shutdown();
 
   for (auto &m : models_)
     m->unload();
@@ -320,7 +335,8 @@ void GameState::handle_event(const SDL_Event &event) {
 // ============================================================
 
 void GameState::update(float dt) {
-  player_.update(dt, level_);
+  jolt_.update(dt);
+  player_.update(dt, jolt_);
   sys_shooting();
   sys_zombie_ai(dt);
   particles_.update(dt);
@@ -334,11 +350,15 @@ void GameState::sys_shooting() {
     return;
 
   const FpsCamera &cam = player_.camera();
-  float best_t = std::numeric_limits<float>::infinity();
-  float wall_nx = 0.f, wall_nz = 0.f, wall_thick = 0.f;
-  const bool wall_hit = engine::ray_walls_nearest_ex(level_.walls,
-      cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz, best_t, wall_nx, wall_nz, wall_thick);
-  const float wall_t = best_t;
+  constexpr float k_max_ray = 500.f;
+
+  // Level geometry raycast via Jolt.
+  engine::JoltRayHit jolt_hit;
+  const bool wall_hit = jolt_.cast_ray_level(
+      cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz, k_max_ray, jolt_hit);
+  const float wall_t = jolt_hit.t;
+
+  float best_t = wall_hit ? wall_t : std::numeric_limits<float>::infinity();
 
   // Targets: find closest, damage it.
   {
@@ -381,15 +401,15 @@ void GameState::sys_shooting() {
     }
   }
 
-  // Bullet hole on wall if no closer hit was recorded.
+  // Bullet hole on wall if level was the closest hit.
   if (wall_hit && best_t >= wall_t - 1e-4f) {
-    const float k_offset = wall_thick * 0.5f + 0.005f;
-    constexpr int k_max  = 200;
+    constexpr float k_offset = 0.005f; // small offset to avoid z-fighting
+    constexpr int   k_max    = 200;
     bullet_holes_.push_back({
-        cam.eyeX + fx * wall_t + wall_nx * k_offset,
-        cam.eyeY + fy * wall_t,
-        cam.eyeZ + fz * wall_t + wall_nz * k_offset,
-        wall_nx, wall_nz});
+        cam.eyeX + fx * wall_t + jolt_hit.nx * k_offset,
+        cam.eyeY + fy * wall_t + jolt_hit.ny * k_offset,
+        cam.eyeZ + fz * wall_t + jolt_hit.nz * k_offset,
+        jolt_hit.nx, jolt_hit.ny, jolt_hit.nz});
     if (int(bullet_holes_.size()) > k_max)
       bullet_holes_.erase(bullet_holes_.begin());
   }
@@ -399,7 +419,7 @@ void GameState::sys_shooting() {
 
 void GameState::sys_zombie_ai(float dt) {
   for (auto &z : zombies_)
-    z.update(dt, player_, level_);
+    z.update(dt, player_, jolt_);
 }
 
 // ============================================================
@@ -561,16 +581,33 @@ void GameState::sys_render_bullet_holes() {
 
   for (uint32_t i = 0; i < n; ++i) {
     const BulletHole& h = bullet_holes_[i];
-    // Right vector: perpendicular to wall normal in XZ; Up: world Y.
-    const float rx = h.nz, rz = -h.nx;
+
+    // Build a tangent frame on the hit surface.
+    // right = cross(normal, up_ref); up_in_plane = cross(right, normal)
+    float rx, ry, rz, upx, upy, upz;
+    if (std::fabs(h.ny) < 0.9f) {
+      // Wall: world Y is the up reference. right = cross(N, worldY) = (nz, 0, -nx).
+      const float rlen = std::sqrt(h.nx*h.nx + h.nz*h.nz);
+      rx = (rlen > 1e-6f) ? h.nz / rlen : 1.f;
+      ry = 0.f;
+      rz = (rlen > 1e-6f) ? -h.nx / rlen : 0.f;
+      upx = 0.f; upy = 1.f; upz = 0.f;
+    } else {
+      // Floor/ceiling: world X as right, compute up in plane.
+      rx = 1.f; ry = 0.f; rz = 0.f;
+      // up = cross(right, normal) = (ry*nz - rz*ny, rz*nx - rx*nz, rx*ny - ry*nx)
+      upx = -h.nz; upy = 0.f; upz = h.nx; // simplified for rx=1
+      const float ulen = std::sqrt(upx*upx + upz*upz);
+      if (ulen > 1e-6f) { upx /= ulen; upz /= ulen; }
+    }
 
     auto vert = [&](float px, float py, float pz, float u, float v) -> LitVertex {
-      return { px, py, pz, h.nx, 0.f, h.nz, u, v, 0xffffffff };
+      return { px, py, pz, h.nx, h.ny, h.nz, u, v, 0xffffffff };
     };
-    vp[i*4+0] = vert(h.x - rx*k_hs, h.y + k_hs, h.z - rz*k_hs, 0.f, 0.f);
-    vp[i*4+1] = vert(h.x + rx*k_hs, h.y + k_hs, h.z + rz*k_hs, 1.f, 0.f);
-    vp[i*4+2] = vert(h.x + rx*k_hs, h.y - k_hs, h.z + rz*k_hs, 1.f, 1.f);
-    vp[i*4+3] = vert(h.x - rx*k_hs, h.y - k_hs, h.z - rz*k_hs, 0.f, 1.f);
+    vp[i*4+0] = vert(h.x + (-rx+upx)*k_hs, h.y + (-ry+upy)*k_hs, h.z + (-rz+upz)*k_hs, 0.f, 0.f);
+    vp[i*4+1] = vert(h.x + ( rx+upx)*k_hs, h.y + ( ry+upy)*k_hs, h.z + ( rz+upz)*k_hs, 1.f, 0.f);
+    vp[i*4+2] = vert(h.x + ( rx-upx)*k_hs, h.y + ( ry-upy)*k_hs, h.z + ( rz-upz)*k_hs, 1.f, 1.f);
+    vp[i*4+3] = vert(h.x + (-rx-upx)*k_hs, h.y + (-ry-upy)*k_hs, h.z + (-rz-upz)*k_hs, 0.f, 1.f);
 
     const uint16_t b = uint16_t(i * 4);
     ip[i*6+0] = b+0; ip[i*6+1] = b+1; ip[i*6+2] = b+2;
@@ -686,10 +723,9 @@ void GameState::sys_render_collision_debug() {
   if (!bgfx::isValid(debug_program_)) return;
 
   const FpsCamera& cam = player_.camera();
-  const engine::Collider& pc = player_.collider();
   draw_capsule_wireframe(0, debug_program_,
-                         cam.eyeX, cam.eyeY - pc.height, cam.eyeZ,
-                         pc.radius, pc.height, 0xff44ff44u);
+                         cam.eyeX, cam.eyeY - game::Player::k_eye_height, cam.eyeZ,
+                         game::Player::k_radius, game::Player::k_eye_height, 0xff44ff44u);
 
   for (const auto& z : zombies_) {
     const engine::Collider& zc = z.collider();

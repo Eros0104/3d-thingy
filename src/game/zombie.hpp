@@ -1,12 +1,11 @@
 #pragma once
 
 #include "engine/collider.hpp"
+#include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/animator.hpp"
 
 #include <bgfx/bgfx.h>
-
-namespace engine { struct Level; }
 
 namespace game {
 
@@ -18,7 +17,8 @@ public:
 
     Zombie(float x, float y, float z, engine::RiggedModel* model);
 
-    void update(float dt, Player& player, const engine::Level& level);
+    void init_jolt(engine::JoltPhysics& jolt);
+    void update(float dt, Player& player, engine::JoltPhysics& jolt);
 
     void render(
         bgfx::ViewId        view_id,
@@ -49,6 +49,9 @@ private:
     float damage_timer_   = 0.f;
     float hit_stun_timer_ = 0.f;
     bool  dying_          = false;
+
+    engine::CharHandle        jolt_handle_ = engine::k_invalid_char;
+    engine::CharVerticalState vert_state_{};
 
     engine::RiggedModel* model_;
     Animator             anim_;

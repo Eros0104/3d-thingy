@@ -1,10 +1,8 @@
 #include "game/zombie.hpp"
 
-#include "game/level/level_data.hpp"
-#include "game/physics_world.hpp"
+#include "engine/physics/jolt_physics.hpp"
 #include "game/player.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
@@ -17,6 +15,12 @@ Zombie::Zombie(float x, float y, float z, engine::RiggedModel* model)
         anim_.bind(*model_);
         anim_.play(*model_, ZombieAnim::Idle, true, true);
     }
+}
+
+void Zombie::init_jolt(engine::JoltPhysics& jolt) {
+    constexpr float k_step = 0.4f;
+    jolt_handle_ = jolt.add_character(x, y, z,
+        k_collider.radius, k_collider.height, k_step);
 }
 
 void Zombie::take_damage(int amount) {
@@ -32,14 +36,14 @@ void Zombie::capsule(float out_a[3], float out_b[3]) const {
     k_collider.capsule_endpoints(x, y, z, out_a, out_b);
 }
 
-void Zombie::update(float dt, game::Player& player, const engine::Level& level) {
+void Zombie::update(float dt, game::Player& player, engine::JoltPhysics& jolt) {
     if (!model_ || !model_->valid()) return;
 
     constexpr float k_walk_speed      = 1.5f;
     constexpr float k_engage_dist     = 1.2f;
     constexpr float k_damage_interval = 1.0f;
     constexpr int   k_damage_per_hit  = 10;
-    const float k_min_sep              = k_collider.radius + engine::PlayerPhysics::k_body_radius_xz;
+    const float     k_min_sep         = k_collider.radius + Player::k_radius;
 
     if (!alive()) {
         if (!dying_) {
@@ -61,13 +65,17 @@ void Zombie::update(float dt, game::Player& player, const engine::Level& level) 
     if (hit_stun_timer_ > 0.f) {
         hit_stun_timer_ -= dt;
         if (hit_stun_timer_ < 0.f) hit_stun_timer_ = 0.f;
+
+        // Still let gravity act even when stunned.
+        jolt.move_character(jolt_handle_, vert_state_, 0.f, 0.f, dt);
+        jolt.get_character_pos(jolt_handle_, x, y, z);
     } else if (dist_xz > k_engage_dist) {
         damage_timer_ = 0.f;
-        const float inv    = 1.0f / dist_xz;
-        const float cand_x = x + pdx * inv * k_walk_speed * dt;
-        const float cand_z = z + pdz * inv * k_walk_speed * dt;
-        engine::resolve_xz_slide(level, x, z, cand_x, cand_z, y,
-                                 k_collider.radius, k_collider.step_up, x, z);
+        const float inv   = 1.f / dist_xz;
+        const float vel_x = pdx * inv * k_walk_speed;
+        const float vel_z = pdz * inv * k_walk_speed;
+        jolt.move_character(jolt_handle_, vert_state_, vel_x, vel_z, dt);
+        jolt.get_character_pos(jolt_handle_, x, y, z);
         anim_.play(*model_, ZombieAnim::Walk, true, false);
     } else {
         damage_timer_ += dt;
@@ -77,21 +85,29 @@ void Zombie::update(float dt, game::Player& player, const engine::Level& level) 
         }
         if (anim_.current_z(*model_) != ZombieAnim::Attack || model_->current_finished())
             anim_.play_random(*model_, ZombieAnim::Attack, false);
+
+        jolt.move_character(jolt_handle_, vert_state_, 0.f, 0.f, dt);
+        jolt.get_character_pos(jolt_handle_, x, y, z);
     }
 
-    // Push overlapping bodies apart.
+    // Push overlapping bodies apart (CharacterVirtual doesn't self-separate).
     const float sep_dx   = x - camera.eyeX;
     const float sep_dz   = z - camera.eyeZ;
     const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
     if (sep_dist > 0.f && sep_dist < k_min_sep) {
         const float half_push = 0.5f * (k_min_sep - sep_dist) / sep_dist;
-        const float prev_x = x, prev_z = z;
+
         x           += sep_dx * half_push;
         z           += sep_dz * half_push;
         camera.eyeX -= sep_dx * half_push;
         camera.eyeZ -= sep_dz * half_push;
-        engine::resolve_xz_slide(level, prev_x, prev_z, x, z, y,
-                                 k_collider.radius, k_collider.step_up, x, z);
+
+        // Sync teleported positions back into Jolt.
+        jolt.set_character_pos(jolt_handle_, x, y, z);
+
+        float px, py, pz;
+        jolt.get_character_pos(player.jolt_handle(), px, py, pz);
+        jolt.set_character_pos(player.jolt_handle(), camera.eyeX, py, camera.eyeZ);
     }
 
     model_->update(dt);

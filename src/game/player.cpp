@@ -1,7 +1,7 @@
 #include "game/player.hpp"
 
 #include "engine/audio.hpp"
-#include "game/level/level_data.hpp"
+#include "engine/physics/jolt_physics.hpp"
 
 #include <SDL.h>
 #include <bx/math.h>
@@ -11,13 +11,14 @@
 
 namespace game {
 
-void Player::init(float sx, float sy, float sz, float syaw,
+void Player::init(float sx, float spawn_eye_y, float sz, float syaw,
+                  engine::JoltPhysics&  jolt,
                   engine::RiggedModel* viewmodel,
                   engine::SoundId      shot_sound,
                   engine::SoundId      step_sound)
 {
     camera_.eyeX = sx;
-    camera_.eyeY = sy;
+    camera_.eyeY = spawn_eye_y;
     camera_.eyeZ = sz;
     camera_.yaw  = syaw;
 
@@ -30,6 +31,9 @@ void Player::init(float sx, float sy, float sz, float syaw,
         viewmodel_anim_.play(*viewmodel_model_, ViewmodelAnim::Take, false, true);
         viewmodel_anim_.play(*viewmodel_model_, ViewmodelAnim::Idle, true,  false);
     }
+
+    const float feet_y = spawn_eye_y - k_eye_height;
+    jolt_handle_ = jolt.add_character(sx, feet_y, sz, k_radius, k_eye_height, k_step_height);
 }
 
 void Player::handle_event(const SDL_Event& event) {
@@ -59,27 +63,38 @@ void Player::handle_event(const SDL_Event& event) {
     }
 }
 
-void Player::update(float dt, const engine::Level& level) {
+void Player::update(float dt, engine::JoltPhysics& jolt) {
     if (mouse_look_)
         fps_camera_apply_mouse(camera_, mouse_rel_x_, mouse_rel_y_, 0.0025f);
     mouse_rel_x_ = 0.f;
     mouse_rel_y_ = 0.f;
 
-    const float prev_x = camera_.eyeX;
-    const float prev_z = camera_.eyeZ;
+    // Compute desired horizontal velocity from WASD input.
+    float dx = 0.f, dy_unused = 0.f, dz = 0.f;
     {
         const uint8_t* keys = SDL_GetKeyboardState(nullptr);
-        float dx = 0.f, dy = 0.f, dz = 0.f;
-        fps_camera_apply_wasd(camera_, keys, dt, 5.0f, dx, dy, dz);
-        camera_.eyeX += dx;
-        camera_.eyeY += dy;
-        camera_.eyeZ += dz;
+        fps_camera_apply_wasd(camera_, keys, dt, 5.0f, dx, dy_unused, dz);
     }
-    engine::player_physics_step(camera_, physics_, dt, level, prev_x, prev_z);
+    // fps_camera_apply_wasd returns displacement (vel * dt); convert to velocity.
+    const float inv_dt = (dt > 1e-6f) ? 1.f / dt : 0.f;
+    const float vel_x  = dx * inv_dt;
+    const float vel_z  = dz * inv_dt;
+
+    const float prev_eye_x = camera_.eyeX;
+    const float prev_eye_z = camera_.eyeZ;
+
+    jolt.move_character(jolt_handle_, vert_state_, vel_x, vel_z, dt);
+
+    // Sync camera from Jolt character position.
+    float fx, fy, fz;
+    jolt.get_character_pos(jolt_handle_, fx, fy, fz);
+    camera_.eyeX = fx;
+    camera_.eyeY = fy + k_eye_height;
+    camera_.eyeZ = fz;
 
     {
-        const float mdx     = camera_.eyeX - prev_x;
-        const float mdz     = camera_.eyeZ - prev_z;
+        const float mdx     = camera_.eyeX - prev_eye_x;
+        const float mdz     = camera_.eyeZ - prev_eye_z;
         const float min_step = 0.5f * dt;
         is_walking_ = (mdx * mdx + mdz * mdz) > (min_step * min_step);
         engine::audio_set_looping(step_sound_, is_walking_);
