@@ -105,6 +105,7 @@ add_executable(fps_engine
   src/engine/texture_loader.cpp
   src/engine/rigged_model.cpp
   src/game/animator.cpp
+  src/game/player.cpp
   src/game/zombie.cpp
   src/engine/window.cpp
   src/engine/hud.cpp

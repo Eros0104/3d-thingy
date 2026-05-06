@@ -55,17 +55,18 @@ bool GameState::init(const char *level_path, int width, int height) {
   height_ = height;
 
   // Audio
+  engine::SoundId shot_sound = engine::k_invalid_sound;
+  engine::SoundId step_sound = engine::k_invalid_sound;
   {
     std::string err;
     if (!engine::audio_init(err)) {
       LOG_WARN("audio: %s (continuing without sound)", err.c_str());
     } else {
-      shot_sound_ =
-          engine::audio_load(ENGINE_SOUNDS_DIR "/pistol_shot.mp3", err);
-      if (shot_sound_ == engine::k_invalid_sound)
+      shot_sound = engine::audio_load(ENGINE_SOUNDS_DIR "/pistol_shot.mp3", err);
+      if (shot_sound == engine::k_invalid_sound)
         LOG_WARN("audio: %s", err.c_str());
-      step_sound_ = engine::audio_load(ENGINE_SOUNDS_DIR "/footsteps.mp3", err);
-      if (step_sound_ == engine::k_invalid_sound)
+      step_sound = engine::audio_load(ENGINE_SOUNDS_DIR "/footsteps.mp3", err);
+      if (step_sound == engine::k_invalid_sound)
         LOG_WARN("audio: %s", err.c_str());
     }
   }
@@ -182,31 +183,22 @@ bool GameState::init(const char *level_path, int width, int height) {
                   BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS |
                   BGFX_STATE_MSAA;
 
-  // Camera at spawn
-  camera_.eyeX = level_.spawn.pos.x;
-  camera_.eyeY =
-      level_.spawn.pos.y + engine::PlayerPhysics::k_eye_height + 0.02f;
-  camera_.eyeZ = level_.spawn.pos.z;
-  camera_.yaw = level_.spawn.yaw_deg * (bx::kPi / 180.0f);
+  // Player
+  {
+    std::string err;
+    engine::RiggedModel *vm =
+        load_model(ENGINE_MODELS_DIR "/animated_pistol-v2.glb", err);
+    if (!vm)
+      LOG_WARN("viewmodel: %s", err.c_str());
+    const float spawn_yaw = level_.spawn.yaw_deg * (bx::kPi / 180.0f);
+    const float spawn_y =
+        level_.spawn.pos.y + engine::PlayerPhysics::k_eye_height + 0.02f;
+    player_.init(level_.spawn.pos.x, spawn_y, level_.spawn.pos.z, spawn_yaw,
+                 vm, shot_sound, step_sound);
+  }
 
   if (SDL_SetRelativeMouseMode(SDL_TRUE) != 0)
     LOG_WARN("SDL_SetRelativeMouseMode: %s", SDL_GetError());
-
-  // Player viewmodel (gun)
-  {
-    std::string err;
-    viewmodel_model_ =
-        load_model(ENGINE_MODELS_DIR "/animated_pistol-v2.glb", err);
-    if (!viewmodel_model_) {
-      LOG_WARN("viewmodel: %s", err.c_str());
-    } else {
-      viewmodel_anim_.bind(*viewmodel_model_);
-      viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Take, false,
-                           true);
-      viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Idle, true,
-                           false);
-    }
-  }
 
   // Spawn initial entities
   spawn_zombie(10.0f, 0.0f, 20.0f);
@@ -223,7 +215,7 @@ bool GameState::init(const char *level_path, int width, int height) {
 // ============================================================
 
 void GameState::shutdown() {
-  if (mouse_look_)
+  if (player_.mouse_look())
     SDL_SetRelativeMouseMode(SDL_FALSE);
 
   engine::audio_shutdown();
@@ -324,30 +316,7 @@ void GameState::on_resize(int width, int height) {
 }
 
 void GameState::handle_event(const SDL_Event &event) {
-  switch (event.type) {
-  case SDL_KEYDOWN:
-    if (event.key.keysym.sym == SDLK_ESCAPE) {
-      mouse_look_ = !mouse_look_;
-      SDL_SetRelativeMouseMode(mouse_look_ ? SDL_TRUE : SDL_FALSE);
-    } else if (event.key.keysym.sym == SDLK_r && !event.key.repeat) {
-      reload_pressed_ = true;
-    } else if (event.key.keysym.sym == SDLK_g && !event.key.repeat) {
-      show_axes_gizmo_ = !show_axes_gizmo_;
-    }
-    break;
-  case SDL_MOUSEBUTTONDOWN:
-    if (event.button.button == SDL_BUTTON_LEFT && mouse_look_)
-      shoot_pressed_ = true;
-    break;
-  case SDL_MOUSEMOTION:
-    if (mouse_look_) {
-      mouse_rel_x_ += static_cast<float>(event.motion.xrel);
-      mouse_rel_y_ += static_cast<float>(event.motion.yrel);
-    }
-    break;
-  default:
-    break;
-  }
+  player_.handle_event(event);
 }
 
 // ============================================================
@@ -355,75 +324,22 @@ void GameState::handle_event(const SDL_Event &event) {
 // ============================================================
 
 void GameState::update(float dt) {
-  // Mouse look
-  if (mouse_look_)
-    fps_camera_apply_mouse(camera_, mouse_rel_x_, mouse_rel_y_, 0.0025f);
-  mouse_rel_x_ = 0.f;
-  mouse_rel_y_ = 0.f;
-
-  // WASD movement + physics
-  const float prev_x = camera_.eyeX;
-  const float prev_z = camera_.eyeZ;
-  {
-    const uint8_t *keys = SDL_GetKeyboardState(nullptr);
-    float dx = 0.f, dy = 0.f, dz = 0.f;
-    fps_camera_apply_wasd(camera_, keys, dt, 5.0f, dx, dy, dz);
-    camera_.eyeX += dx;
-    camera_.eyeY += dy;
-    camera_.eyeZ += dz;
-  }
-  engine::player_physics_step(camera_, player_physics_, dt, level_, prev_x,
-                              prev_z);
-
-  // Footsteps follow actual post-physics movement, not key state.
-  {
-    const float mdx = camera_.eyeX - prev_x;
-    const float mdz = camera_.eyeZ - prev_z;
-    const float min_step = 0.5f * dt;
-    is_walking_ = (mdx * mdx + mdz * mdz) > (min_step * min_step);
-    engine::audio_set_looping(step_sound_, is_walking_);
-  }
-
+  player_.update(dt, level_);
   sys_shooting();
-
-  // Reload: set flag, play animation on first frame
-  {
-    const bool can_reload = !is_reloading_ && bullets_in_clip_ < clip_size_;
-    if (!can_reload)
-      reload_pressed_ = false;
-    if (reload_pressed_)
-      is_reloading_ = true;
-  }
-
-  sys_viewmodel_anim(dt);
   sys_zombie_ai(dt);
-
-  // Consume frame inputs
-  shoot_pressed_ = false;
-  reload_pressed_ = false;
 }
 
 // --- system: shoot ---
 
 void GameState::sys_shooting() {
-  if (!shoot_pressed_)
+  float fx, fy, fz;
+  if (!player_.try_fire(fx, fy, fz))
     return;
-  const bool can_shoot = !is_reloading_ && bullets_in_clip_ > 0;
-  if (!can_shoot) {
-    shoot_pressed_ = false;
-    return;
-  }
 
-  engine::audio_play(shot_sound_);
-  --bullets_in_clip_;
-
-  const float fx = std::cos(camera_.pitch) * std::sin(camera_.yaw);
-  const float fy = std::sin(camera_.pitch);
-  const float fz = std::cos(camera_.pitch) * std::cos(camera_.yaw);
-
+  const FpsCamera &cam = player_.camera();
   float best_t = std::numeric_limits<float>::infinity();
-  engine::ray_walls_nearest(level_.walls, camera_.eyeX, camera_.eyeY,
-                            camera_.eyeZ, fx, fy, fz, best_t);
+  engine::ray_walls_nearest(level_.walls, cam.eyeX, cam.eyeY, cam.eyeZ,
+                            fx, fy, fz, best_t);
 
   // Targets: find closest, damage it.
   {
@@ -435,7 +351,7 @@ void GameState::sys_shooting() {
         continue;
       const float h = tgt.half_extent;
       float t_hit;
-      if (engine::ray_aabb(camera_.eyeX, camera_.eyeY, camera_.eyeZ, fx, fy, fz,
+      if (engine::ray_aabb(cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz,
                            tr.x - h, tr.y - h, tr.z - h, tr.x + h, tr.y + h,
                            tr.z + h, t_hit) &&
           t_hit < best_t) {
@@ -450,64 +366,28 @@ void GameState::sys_shooting() {
     }
   }
 
-  // Zombies: test capsule, only if closer than wall/target.
+  // Zombies: capsule test, only if closer than wall/target.
   for (auto &z : zombies_) {
     if (!z.alive())
       continue;
     float ca[3], cb[3];
     z.capsule(ca, cb);
     float t_hit;
-    if (engine::ray_capsule(camera_.eyeX, camera_.eyeY, camera_.eyeZ, fx, fy,
-                            fz, ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
+    if (engine::ray_capsule(cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz,
+                            ca[0], ca[1], ca[2], cb[0], cb[1], cb[2],
                             game::Zombie::k_radius, t_hit) &&
         t_hit < best_t) {
       best_t = t_hit;
       z.take_damage(10);
     }
   }
-
-  // Trigger viewmodel shoot animation.
-  if (viewmodel_model_ && viewmodel_model_->valid())
-    viewmodel_anim_.play(*viewmodel_model_, game::ViewmodelAnim::Shoot, false,
-                         true);
-}
-
-// --- system: viewmodel animation ---
-
-void GameState::sys_viewmodel_anim(float dt) {
-  if (!viewmodel_model_)
-    return;
-  auto &vm = *viewmodel_model_;
-  if (!vm.valid())
-    return;
-
-  const game::ViewmodelAnim cur = viewmodel_anim_.current_vm(vm);
-
-  // Reload completion
-  if (is_reloading_ && cur == game::ViewmodelAnim::Reload &&
-      vm.current_finished()) {
-    bullets_in_clip_ = clip_size_;
-    is_reloading_ = false;
-  }
-
-  if (reload_pressed_ && is_reloading_) {
-    viewmodel_anim_.play(vm, game::ViewmodelAnim::Reload, false, true);
-  } else {
-    const bool one_shot = cur == game::ViewmodelAnim::Shoot ||
-                          cur == game::ViewmodelAnim::Reload ||
-                          cur == game::ViewmodelAnim::Take;
-    if (one_shot && vm.current_finished())
-      viewmodel_anim_.play(vm, game::ViewmodelAnim::Idle, true, false);
-  }
-
-  vm.update(dt);
 }
 
 // --- system: zombie AI ---
 
 void GameState::sys_zombie_ai(float dt) {
   for (auto &z : zombies_)
-    z.update(dt, camera_, player_health_, level_);
+    z.update(dt, player_, level_);
 }
 
 // ============================================================
@@ -520,8 +400,8 @@ void GameState::render(int width, int height) {
 
   const float aspect = height > 0 ? float(width) / float(height) : 1.f;
   float view[16], proj[16];
-  fps_camera_view_proj(camera_, aspect, bgfx::getCaps()->homogeneousDepth, view,
-                       proj);
+  fps_camera_view_proj(player_.camera(), aspect, bgfx::getCaps()->homogeneousDepth,
+                       view, proj);
 
   bgfx::setViewTransform(0, view, proj);
   bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
@@ -636,23 +516,9 @@ void GameState::sys_render_characters() {
     return;
 
   // Player viewmodel
-  if (viewmodel_model_ && viewmodel_model_->valid()) {
-    engine::ViewmodelDrawParams vmp{};
-    vmp.eye[0] = camera_.eyeX;
-    vmp.eye[1] = camera_.eyeY;
-    vmp.eye[2] = camera_.eyeZ;
-    vmp.yaw = -camera_.yaw;
-    vmp.pitch = -camera_.pitch;
-    vmp.offset[0] = 0.15f;
-    vmp.offset[1] = -1.575f;
-    vmp.offset[2] = 0.0f;
-    vmp.scale = 1.f;
-    viewmodel_model_->submit_viewmodel(1, skinned_program_, u_bones_, s_albedo_,
-                                       u_baseColor_, white_tex_, render_state_,
-                                       vmp);
-    if (show_axes_gizmo_ && bgfx::isValid(debug_program_))
-      viewmodel_model_->submit_axes_gizmo(1, debug_program_, vmp, 0.30f);
-  }
+  player_.render_viewmodel(1, skinned_program_, u_bones_, s_albedo_,
+                           u_baseColor_, white_tex_, render_state_,
+                           debug_program_);
 
   // World-space characters (zombies)
   for (const auto &z : zombies_)
@@ -674,10 +540,11 @@ void GameState::sys_render_hud() {
       float(height_) - margin_bottom + engine::hud_descent();
 
   char buf[16];
-  std::snprintf(buf, sizeof(buf), "%d%%", player_health_);
+  std::snprintf(buf, sizeof(buf), "%d%%", player_.health());
   engine::hud_draw_text(buf, margin_x, baseline_y, k_hud_red);
 
-  std::snprintf(buf, sizeof(buf), "%d/%d", bullets_in_clip_, clip_size_);
+  std::snprintf(buf, sizeof(buf), "%d/%d", player_.bullets_in_clip(),
+                player_.clip_size());
   engine::hud_draw_text_right(buf, float(width_) - margin_x, baseline_y,
                               k_hud_red);
 
@@ -691,7 +558,8 @@ void GameState::sys_render_debug_text() {
   bgfx::dbgTextClear();
   bgfx::dbgTextPrintf(
       0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   LMB:Shoot R:Reload",
-      mouse_look_ ? "free cursor" : "capture", show_axes_gizmo_ ? "on" : "off");
+      player_.mouse_look() ? "free cursor" : "capture",
+      player_.show_axes_gizmo() ? "on" : "off");
   bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
                       level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
                       level_.sectors.size(), level_.walls.size(),

@@ -1,12 +1,9 @@
 #pragma once
 
-#include "engine/audio.hpp"
 #include "engine/rigged_model.hpp"
-#include "game/animator.hpp"
-#include "game/fps_camera.hpp"
-#include "game/zombie.hpp"
 #include "game/level/level_data.hpp"
-#include "game/physics_world.hpp"
+#include "game/player.hpp"
+#include "game/zombie.hpp"
 
 #include <SDL.h>
 #include <bgfx/bgfx.h>
@@ -40,7 +37,6 @@ private:
     engine::RiggedModel* load_model(const char* path, std::string& err);
 
     void sys_shooting();
-    void sys_viewmodel_anim(float dt);
     void sys_zombie_ai(float dt);
     void sys_set_lights();
     void sys_render_level();
@@ -49,34 +45,14 @@ private:
     void sys_render_hud();
     void sys_render_debug_text();
 
-    // --- ECS ---
+    // --- ECS (targets only for now) ---
     entt::registry registry_;
 
     // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
     std::vector<std::unique_ptr<engine::RiggedModel>> models_;
 
+    game::Player         player_;
     std::vector<game::Zombie> zombies_;
-
-    // --- player (singleton, not an entity) ---
-    FpsCamera             camera_{};
-    engine::PlayerPhysics player_physics_{};
-    int  player_health_   = 100;
-    int  bullets_in_clip_ = 8;
-    int  clip_size_       = 8;
-    bool is_reloading_    = false;
-    bool is_walking_      = false;
-    bool mouse_look_      = true;
-    bool show_axes_gizmo_ = false;
-
-    // Player viewmodel (gun).
-    engine::RiggedModel* viewmodel_model_ = nullptr;
-    game::Animator       viewmodel_anim_;
-
-    // --- per-frame input (accumulated in handle_event, consumed in update) ---
-    float mouse_rel_x_   = 0.f;
-    float mouse_rel_y_   = 0.f;
-    bool  shoot_pressed_  = false;
-    bool  reload_pressed_ = false;
 
     // --- level ---
     engine::Level level_{};
@@ -110,10 +86,6 @@ private:
     bgfx::TextureHandle white_tex_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle floor_tex_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle wall_tex_  = BGFX_INVALID_HANDLE;
-
-    // --- audio ---
-    engine::SoundId shot_sound_  = engine::k_invalid_sound;
-    engine::SoundId step_sound_  = engine::k_invalid_sound;
 
     bool     hud_ok_       = false;
     uint64_t render_state_ = 0;

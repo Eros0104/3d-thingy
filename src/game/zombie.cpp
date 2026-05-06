@@ -1,8 +1,8 @@
 #include "game/zombie.hpp"
 
-#include "game/fps_camera.hpp"
 #include "game/level/level_data.hpp"
 #include "game/physics_world.hpp"
+#include "game/player.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -33,7 +33,7 @@ void Zombie::capsule(float out_a[3], float out_b[3]) const {
     out_b[0] = x; out_b[1] = y + k_height - k_radius;  out_b[2] = z;
 }
 
-void Zombie::update(float dt, FpsCamera& camera, int& player_health, const engine::Level& level) {
+void Zombie::update(float dt, game::Player& player, const engine::Level& level) {
     if (!model_ || !model_->valid()) return;
 
     constexpr float k_walk_speed      = 1.5f;
@@ -50,6 +50,8 @@ void Zombie::update(float dt, FpsCamera& camera, int& player_health, const engin
         model_->update(dt);
         return;
     }
+
+    FpsCamera& camera = player.camera();
 
     const float pdx     = camera.eyeX - x;
     const float pdz     = camera.eyeZ - z;
@@ -72,7 +74,7 @@ void Zombie::update(float dt, FpsCamera& camera, int& player_health, const engin
         damage_timer_ += dt;
         if (damage_timer_ >= k_damage_interval) {
             damage_timer_ -= k_damage_interval;
-            player_health = std::max(0, player_health - k_damage_per_hit);
+            player.take_damage(k_damage_per_hit);
         }
         if (anim_.current_z(*model_) != ZombieAnim::Attack || model_->current_finished())
             anim_.play_random(*model_, ZombieAnim::Attack, false);

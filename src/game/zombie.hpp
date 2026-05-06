@@ -5,10 +5,11 @@
 
 #include <bgfx/bgfx.h>
 
-struct FpsCamera;
 namespace engine { struct Level; }
 
 namespace game {
+
+class Player;
 
 class Zombie {
 public:
@@ -17,7 +18,7 @@ public:
 
     Zombie(float x, float y, float z, engine::RiggedModel* model);
 
-    void update(float dt, FpsCamera& camera, int& player_health, const engine::Level& level);
+    void update(float dt, Player& player, const engine::Level& level);
 
     void render(
         bgfx::ViewId        view_id,
