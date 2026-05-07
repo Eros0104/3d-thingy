@@ -80,12 +80,6 @@ struct Reader {
 		p += n;
 		return true;
 	}
-	bool read_u8(uint8_t& out)
-	{
-		if (failed || p + 1 > end) { failed = true; return false; }
-		out = *p++;
-		return true;
-	}
 	bool read_string(std::string& out)
 	{
 		uint32_t n = 0;
@@ -129,17 +123,22 @@ void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes)
 
 	write_u32(out_bytes, static_cast<uint32_t>(level.walls.size()));
 	for (const Wall& w : level.walls) {
-		out_bytes.push_back(static_cast<uint8_t>(w.type));
 		write_f32(out_bytes, w.a.x);
+		write_f32(out_bytes, w.a.y);
 		write_f32(out_bytes, w.a.z);
 		write_f32(out_bytes, w.b.x);
+		write_f32(out_bytes, w.b.y);
 		write_f32(out_bytes, w.b.z);
-		write_f32(out_bytes, w.y0);
-		write_f32(out_bytes, w.y1);
-		write_f32(out_bytes, w.thickness);
-		write_f32(out_bytes, w.door_width);
-		write_f32(out_bytes, w.door_offset);
-		write_f32(out_bytes, w.door_height);
+		write_f32(out_bytes, w.height);
+	}
+
+	write_u32(out_bytes, static_cast<uint32_t>(level.brushes.size()));
+	for (const Brush& br : level.brushes) {
+		write_i32(out_bytes, br.wall);
+		write_f32(out_bytes, br.offset);
+		write_f32(out_bytes, br.width);
+		write_f32(out_bytes, br.y_start);
+		write_f32(out_bytes, br.height);
 	}
 
 	write_u32(out_bytes, static_cast<uint32_t>(level.stairs.size()));
@@ -173,7 +172,7 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 
 	char magic[4];
 	if (!r.read_bytes(magic, 4) || std::memcmp(magic, k_evil_magic, 4) != 0) {
-		err = "bad magic (not a .evil v2 level)";
+		err = "bad magic (not an EVIL level)";
 		return false;
 	}
 	uint32_t version = 0;
@@ -183,75 +182,58 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 	}
 	out.version = static_cast<int>(version);
 
-	if (!r.read_string(out.name)) {
-		err = "truncated name";
-		return false;
-	}
-	if (!r.read_f32(out.wall_height)) {
-		err = "truncated wall_height";
-		return false;
-	}
+	if (!r.read_string(out.name)) { err = "truncated name"; return false; }
+	if (!r.read_f32(out.wall_height)) { err = "truncated wall_height"; return false; }
 	for (int i = 0; i < 3; ++i) {
 		if (!r.read_f32(out.ambient[static_cast<size_t>(i)])) {
-			err = "truncated ambient";
-			return false;
+			err = "truncated ambient"; return false;
 		}
 	}
-
 	if (!r.read_f32(out.spawn.pos.x) || !r.read_f32(out.spawn.pos.y) || !r.read_f32(out.spawn.pos.z)
 		|| !r.read_f32(out.spawn.yaw_deg)) {
-		err = "truncated spawn";
-		return false;
+		err = "truncated spawn"; return false;
 	}
 
 	uint32_t ns = 0;
-	if (!r.read_u32(ns)) {
-		err = "truncated sectors count";
-		return false;
-	}
+	if (!r.read_u32(ns)) { err = "truncated sectors count"; return false; }
 	out.sectors.resize(ns);
 	for (uint32_t i = 0; i < ns; ++i) {
 		Sector& s = out.sectors[i];
-		if (!r.read_string(s.id)) {
-			err = "truncated sector id";
-			return false;
-		}
+		if (!r.read_string(s.id)) { err = "truncated sector id"; return false; }
 		uint32_t np = 0;
-		if (!r.read_u32(np)) {
-			err = "truncated sector poly count";
-			return false;
-		}
+		if (!r.read_u32(np)) { err = "truncated sector poly count"; return false; }
 		s.polygon.resize(np);
 		for (uint32_t j = 0; j < np; ++j) {
 			if (!r.read_f32(s.polygon[j].x) || !r.read_f32(s.polygon[j].z)) {
-				err = "truncated sector point";
-				return false;
+				err = "truncated sector point"; return false;
 			}
 		}
 		if (!r.read_f32(s.floor_y) || !r.read_f32(s.ceiling_y)) {
-			err = "truncated sector y";
-			return false;
+			err = "truncated sector y"; return false;
 		}
 	}
 
 	uint32_t nw = 0;
-	if (!r.read_u32(nw)) {
-		err = "truncated walls count";
-		return false;
-	}
+	if (!r.read_u32(nw)) { err = "truncated walls count"; return false; }
 	out.walls.resize(nw);
 	for (uint32_t i = 0; i < nw; ++i) {
 		Wall& w = out.walls[i];
-		uint8_t t = 0;
-		if (!r.read_u8(t)) { err = "truncated wall"; return false; }
-		w.type = static_cast<WallType>(t);
-		if (!r.read_f32(w.a.x) || !r.read_f32(w.a.z)
-			|| !r.read_f32(w.b.x) || !r.read_f32(w.b.z)
-			|| !r.read_f32(w.y0) || !r.read_f32(w.y1)
-			|| !r.read_f32(w.thickness)
-			|| !r.read_f32(w.door_width) || !r.read_f32(w.door_offset) || !r.read_f32(w.door_height)) {
-			err = "truncated wall";
-			return false;
+		if (!r.read_f32(w.a.x) || !r.read_f32(w.a.y) || !r.read_f32(w.a.z)
+			|| !r.read_f32(w.b.x) || !r.read_f32(w.b.y) || !r.read_f32(w.b.z)
+			|| !r.read_f32(w.height)) {
+			err = "truncated wall"; return false;
+		}
+	}
+
+	uint32_t nb = 0;
+	if (!r.read_u32(nb)) { err = "truncated brushes count"; return false; }
+	out.brushes.resize(nb);
+	for (uint32_t i = 0; i < nb; ++i) {
+		Brush& br = out.brushes[i];
+		if (!r.read_i32(br.wall)
+			|| !r.read_f32(br.offset) || !r.read_f32(br.width)
+			|| !r.read_f32(br.y_start) || !r.read_f32(br.height)) {
+			err = "truncated brush"; return false;
 		}
 	}
 
@@ -264,8 +246,7 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 			|| !r.read_f32(s.center_b.x) || !r.read_f32(s.center_b.z)
 			|| !r.read_f32(s.width) || !r.read_f32(s.from_y) || !r.read_f32(s.to_y)
 			|| !r.read_i32(s.steps)) {
-			err = "truncated stair";
-			return false;
+			err = "truncated stair"; return false;
 		}
 	}
 
@@ -277,8 +258,7 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 		if (!r.read_f32(l.pos.x) || !r.read_f32(l.pos.y) || !r.read_f32(l.pos.z)
 			|| !r.read_f32(l.color[0]) || !r.read_f32(l.color[1]) || !r.read_f32(l.color[2])
 			|| !r.read_f32(l.intensity)) {
-			err = "truncated light";
-			return false;
+			err = "truncated light"; return false;
 		}
 	}
 

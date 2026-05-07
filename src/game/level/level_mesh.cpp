@@ -1,6 +1,8 @@
 #include "game/level/level_mesh.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace engine {
 
@@ -11,10 +13,9 @@ constexpr float k_wall_uv_scale = 0.35f;
 constexpr uint32_t k_floor_abgr = 0xffffffffu;
 constexpr uint32_t k_wall_abgr = 0xffe8e4ddu;
 constexpr uint32_t k_stair_abgr = 0xffd8d4ccu;
-
-constexpr float k_broken_wall_height = 1.05f;  ///< Remnant height for `Broken` wall type.
-constexpr float k_window_sill_h = 1.2f;        ///< World-Y distance from wall.y0 to sill bottom.
-constexpr float k_window_top_h = 2.1f;         ///< World-Y distance from wall.y0 to slit top.
+constexpr uint32_t k_frame_abgr = 0xff3c5a78u; // dark mahogany-ish wood trim
+constexpr float k_frame_width = 0.12f;          // full strip width; half overlaps wall, half opening
+constexpr float k_frame_push = 0.02f;           // offset along wall normal to avoid z-fighting
 
 void push_v(
 	std::vector<LitVertex>& v,
@@ -48,7 +49,6 @@ bool triangle_contains(Vec2 a, Vec2 b, Vec2 c, Vec2 p)
 	return !(has_neg && has_pos);
 }
 
-/// Signed cross (z-component) of (b-a) x (c-b); > 0 means CCW turn at b (convex for CCW polygon).
 float cross_z(Vec2 a, Vec2 b, Vec2 c)
 {
 	return (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x);
@@ -56,7 +56,6 @@ float cross_z(Vec2 a, Vec2 b, Vec2 c)
 
 void emit_floor_tri(std::vector<LitVertex>& out, Vec2 a, Vec2 b, Vec2 c, float y)
 {
-	// Winding chosen so the resulting surface normal points +Y (top-facing floor).
 	const auto add = [&](Vec2 p) {
 		push_v(out, p.x, y, p.z, 0.0f, 1.0f, 0.0f,
 			p.x * k_floor_uv_per_world, p.z * k_floor_uv_per_world, k_floor_abgr);
@@ -66,7 +65,6 @@ void emit_floor_tri(std::vector<LitVertex>& out, Vec2 a, Vec2 b, Vec2 c, float y
 
 void emit_ceiling_tri(std::vector<LitVertex>& out, Vec2 a, Vec2 b, Vec2 c, float y)
 {
-	// Opposite winding of floor so the surface normal points -Y (viewable from below).
 	const auto add = [&](Vec2 p) {
 		push_v(out, p.x, y, p.z, 0.0f, -1.0f, 0.0f,
 			p.x * k_floor_uv_per_world, p.z * k_floor_uv_per_world, k_floor_abgr);
@@ -104,7 +102,7 @@ bool triangulate_polygon(const std::vector<Vec2>& poly, std::vector<int>& out_in
 			const Vec2 b = poly[static_cast<size_t>(bi)];
 			const Vec2 c = poly[static_cast<size_t>(ci)];
 			if (cross_z(a, b, c) <= 0.0f) {
-				continue; // reflex or colinear
+				continue;
 			}
 			bool any_inside = false;
 			for (int k = 0; k < m; ++k) {
@@ -154,15 +152,9 @@ void emit_sector_floor_and_ceiling(std::vector<LitVertex>& out, const Sector& s)
 	}
 }
 
-// ---------------- Wall prism (thick segments) ------------------------------------------------
+// ---------------- Wall quad with CSG brush cutouts ------------------------------------------
 
-Vec2 lerp_vec2(Vec2 a, Vec2 b, float t)
-{
-	return Vec2{a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t};
-}
-
-/// Emit a vertical quad from world point `a` to `b` spanning [y0, y1] with the given outward
-/// normal. U coordinate runs from u0 at `a` to u1 at `b`; V follows world Y.
+/// Emit one vertical quad strip spanning [t0, t1] (parametric) horizontally and [y0, y1] vertically.
 void emit_vertical_quad(
 	std::vector<LitVertex>& out,
 	Vec2 a, Vec2 b,
@@ -171,7 +163,7 @@ void emit_vertical_quad(
 	float nx, float nz,
 	uint32_t abgr)
 {
-	if (y1 <= y0) {
+	if (y1 <= y0 || u1 <= u0) {
 		return;
 	}
 	const float v0 = y0 * k_wall_uv_scale;
@@ -184,172 +176,108 @@ void emit_vertical_quad(
 	push_v(out, a.x, y1, a.z, nx, 0, nz, u0, v1, abgr);
 }
 
-/// Emit a horizontal quad (y fixed) covering the rectangle a→b→c→d with the given Y-normal
-/// direction (+Y for floors, -Y for ceilings / door heads / wall tops viewed from below).
-void emit_horizontal_quad(
-	std::vector<LitVertex>& out,
-	Vec2 a, Vec2 b, Vec2 c, Vec2 d,
-	float y,
-	float ny,
-	uint32_t abgr)
-{
-	const auto v = [&](Vec2 p) {
-		push_v(out, p.x, y, p.z, 0.0f, ny, 0.0f,
-			p.x * k_floor_uv_per_world, p.z * k_floor_uv_per_world, abgr);
-	};
-	v(a); v(b); v(c);
-	v(a); v(c); v(d);
-}
-
-/// Emit one vertical "face" of a thick wall — a quad along the segment `(a, b)` spanning
-/// [y0, y1] — with the variant cutout applied (door opening, broken-wall trim, window slit).
-/// `nx, nz` is the outward normal for this face.
-void emit_face_with_variant(
-	std::vector<LitVertex>& out,
-	const Wall& w,
-	Vec2 a, Vec2 b,
-	float seg_len,
-	float nx, float nz)
-{
-	const float u_total = seg_len * k_wall_uv_scale;
-
-	switch (w.type) {
-	case WallType::Normal:
-		emit_vertical_quad(out, a, b, w.y0, w.y1, 0.0f, u_total, nx, nz, k_wall_abgr);
-		break;
-	case WallType::Door: {
-		float door_w = w.door_width;
-		if (door_w > seg_len) door_w = seg_len;
-		float door_off = w.door_offset;
-		if (door_off < 0.0f) door_off = 0.5f * (seg_len - door_w);
-		if (door_off < 0.0f) door_off = 0.0f;
-		if (door_off + door_w > seg_len) door_off = seg_len - door_w;
-		const float t0 = door_off / seg_len;
-		const float t1 = (door_off + door_w) / seg_len;
-		const float door_top_y = w.y0 + w.door_height;
-		const float top_y = door_top_y < w.y1 ? door_top_y : w.y1;
-
-		const Vec2 p0 = lerp_vec2(a, b, t0);
-		const Vec2 p1 = lerp_vec2(a, b, t1);
-		if (t0 > 0.0f) {
-			emit_vertical_quad(out, a, p0, w.y0, w.y1, 0.0f, t0 * u_total, nx, nz, k_wall_abgr);
-		}
-		if (t1 < 1.0f) {
-			emit_vertical_quad(out, p1, b, w.y0, w.y1, t1 * u_total, u_total, nx, nz, k_wall_abgr);
-		}
-		if (w.y1 > top_y) {
-			emit_vertical_quad(out, p0, p1, top_y, w.y1, t0 * u_total, t1 * u_total, nx, nz, k_wall_abgr);
-		}
-		break;
-	}
-	case WallType::Broken: {
-		float top = w.y0 + k_broken_wall_height;
-		if (top > w.y1) top = w.y1;
-		emit_vertical_quad(out, a, b, w.y0, top, 0.0f, u_total, nx, nz, k_wall_abgr);
-		break;
-	}
-	case WallType::Window: {
-		const float sill = w.y0 + k_window_sill_h;
-		const float wtop = w.y0 + k_window_top_h;
-		const float s = sill < w.y1 ? sill : w.y1;
-		const float t = wtop < w.y1 ? wtop : w.y1;
-		if (s > w.y0) {
-			emit_vertical_quad(out, a, b, w.y0, s, 0.0f, u_total, nx, nz, k_wall_abgr);
-		}
-		if (w.y1 > t) {
-			emit_vertical_quad(out, a, b, t, w.y1, 0.0f, u_total, nx, nz, k_wall_abgr);
-		}
-		break;
-	}
-	}
-}
-
-/// Returns the top Y of the wall body — below any lintel/remnant limit. Controls how tall the
-/// top cap / end caps of the prism are.
-float wall_body_top_y(const Wall& w)
-{
-	if (w.type == WallType::Broken) {
-		const float top = w.y0 + k_broken_wall_height;
-		return top < w.y1 ? top : w.y1;
-	}
-	return w.y1;
-}
-
-void emit_wall(std::vector<LitVertex>& out, const Wall& w)
+/// Emit a wall plane with zero or more brush cutouts. Brushes are sorted by offset and may not
+/// overlap. Any brush partially outside the wall's extents is clamped silently.
+void emit_wall(std::vector<LitVertex>& out, const Wall& w, std::vector<const Brush*> brushes)
 {
 	const float dx = w.b.x - w.a.x;
 	const float dz = w.b.z - w.a.z;
-	const float len = std::sqrt(dx * dx + dz * dz);
-	if (len <= 1e-6f || w.y1 <= w.y0) {
+	const float horiz_len = std::sqrt(dx * dx + dz * dz);
+	if (horiz_len <= 1e-6f || w.height <= 0.0f) {
 		return;
 	}
 
-	const float half_t = 0.5f * w.thickness;
-	if (half_t <= 1e-4f) {
-		// Zero thickness — emit a single quad (old behavior, double-sided via abs() shader).
-		const float nx = -dz / len;
-		const float nz = dx / len;
-		emit_face_with_variant(out, w, w.a, w.b, len, nx, nz);
-		return;
+	// Outward normal perpendicular to the wall in the XZ plane.
+	const float nx = -dz / horiz_len;
+	const float nz = dx / horiz_len;
+
+	const float base_y = w.a.y;
+	const float top_y = base_y + w.height;
+	const float total_u = horiz_len * k_wall_uv_scale;
+
+	// Sort by horizontal offset along the wall so we can walk left-to-right.
+	std::sort(brushes.begin(), brushes.end(), [](const Brush* a, const Brush* b) {
+		return a->offset < b->offset;
+	});
+
+	// Emit a quad strip at parametric positions [t0, t1] and world Y [y0, y1].
+	const auto emit_strip = [&](float t0, float t1, float y0, float y1) {
+		const Vec2 pa{w.a.x + dx * t0, w.a.z + dz * t0};
+		const Vec2 pb{w.a.x + dx * t1, w.a.z + dz * t1};
+		emit_vertical_quad(out, pa, pb, y0, y1,
+			t0 * total_u, t1 * total_u, nx, nz, k_wall_abgr);
+	};
+
+	float cursor = 0.0f; // world-unit position along wall
+
+	for (const Brush* br : brushes) {
+		const float br_off = std::max(0.0f, std::min(br->offset, horiz_len));
+		const float br_end = std::max(br_off, std::min(br->offset + br->width, horiz_len));
+		const float br_y0 = std::max(br->y_start, base_y);
+		const float br_y1 = std::min(br->y_start + br->height, top_y);
+
+		const float t_off = br_off / horiz_len;
+		const float t_end = br_end / horiz_len;
+
+		// Solid strip before this brush
+		if (br_off > cursor + 1e-6f) {
+			emit_strip(cursor / horiz_len, t_off, base_y, top_y);
+		}
+
+		// Within brush area: emit solid strips above and below the opening
+		if (br_y0 > base_y + 1e-6f) {
+			emit_strip(t_off, t_end, base_y, br_y0);
+		}
+		if (br_y1 < top_y - 1e-6f) {
+			emit_strip(t_off, t_end, br_y1, top_y);
+		}
+
+		cursor = br_end;
 	}
 
-	// Unit direction and outward perpendicular (left side has normal +perp, right side -perp).
-	const float ux = dx / len;
-	const float uz = dz / len;
-	const float px = -uz;
-	const float pz = ux;
-
-	const Vec2 a_left{w.a.x + px * half_t, w.a.z + pz * half_t};
-	const Vec2 b_left{w.b.x + px * half_t, w.b.z + pz * half_t};
-	const Vec2 a_right{w.a.x - px * half_t, w.a.z - pz * half_t};
-	const Vec2 b_right{w.b.x - px * half_t, w.b.z - pz * half_t};
-
-	// Left and right side faces carry the variant's cutouts.
-	emit_face_with_variant(out, w, a_left, b_left, len, px, pz);
-	emit_face_with_variant(out, w, a_right, b_right, len, -px, -pz);
-
-	// Top cap (at body_top_y) so you don't see into the wall from above.
-	const float body_top = wall_body_top_y(w);
-	if (body_top > w.y0) {
-		emit_horizontal_quad(out, a_left, b_left, b_right, a_right, body_top, 1.0f, k_wall_abgr);
+	// Solid strip after the last brush
+	if (cursor < horiz_len - 1e-6f) {
+		emit_strip(cursor / horiz_len, 1.0f, base_y, top_y);
 	}
 
-	// End caps seal the segment endpoints. Small overlap with neighboring walls at corners is
-	// acceptable for a 0.2m-ish thickness; tidy miters can come later from a junction graph.
-	if (body_top > w.y0) {
-		emit_vertical_quad(out, a_left, a_right, w.y0, body_top, 0.0f, w.thickness * k_wall_uv_scale,
-			-ux, -uz, k_wall_abgr);
-		emit_vertical_quad(out, b_right, b_left, w.y0, body_top, 0.0f, w.thickness * k_wall_uv_scale,
-			ux, uz, k_wall_abgr);
-	}
+	// Door/window frames: trim strips straddling each opening edge, pushed slightly forward.
+	{
+		const float hw_y = k_frame_width * 0.5f;
+		const float ox = nx * k_frame_push;
+		const float oz = nz * k_frame_push;
 
-	// Door jambs — interior surfaces of the opening (left / right / head).
-	if (w.type == WallType::Door) {
-		float door_w = w.door_width;
-		if (door_w > len) door_w = len;
-		float door_off = w.door_offset;
-		if (door_off < 0.0f) door_off = 0.5f * (len - door_w);
-		if (door_off < 0.0f) door_off = 0.0f;
-		if (door_off + door_w > len) door_off = len - door_w;
-		const float t0 = door_off / len;
-		const float t1 = (door_off + door_w) / len;
-		const float door_top_y = w.y0 + w.door_height;
-		const float head_y = door_top_y < w.y1 ? door_top_y : w.y1;
+		const auto emit_frame_strip = [&](float t0, float t1, float y0, float y1) {
+			t0 = std::max(0.0f, t0); t1 = std::min(1.0f, t1);
+			y0 = std::max(base_y, y0); y1 = std::min(top_y, y1);
+			if (t1 <= t0 + 1e-6f || y1 <= y0 + 1e-6f) return;
+			const Vec2 pa{w.a.x + dx * t0 + ox, w.a.z + dz * t0 + oz};
+			const Vec2 pb{w.a.x + dx * t1 + ox, w.a.z + dz * t1 + oz};
+			emit_vertical_quad(out, pa, pb, y0, y1,
+				t0 * total_u, t1 * total_u, nx, nz, k_frame_abgr);
+		};
 
-		const Vec2 p0_left = lerp_vec2(a_left, b_left, t0);
-		const Vec2 p0_right = lerp_vec2(a_right, b_right, t0);
-		const Vec2 p1_left = lerp_vec2(a_left, b_left, t1);
-		const Vec2 p1_right = lerp_vec2(a_right, b_right, t1);
+		for (const Brush* br : brushes) {
+			const float br_off = std::max(0.0f, std::min(br->offset, horiz_len));
+			const float br_end = std::max(br_off, std::min(br->offset + br->width, horiz_len));
+			const float br_y0 = std::max(br->y_start, base_y);
+			const float br_y1 = std::min(br->y_start + br->height, top_y);
+			if (br_end - br_off < 1e-6f || br_y1 - br_y0 < 1e-6f) continue;
 
-		if (head_y > w.y0) {
-			// Near jamb (at t0). Outward normal faces into the opening (+ascent direction).
-			emit_vertical_quad(out, p0_left, p0_right, w.y0, head_y,
-				0.0f, w.thickness * k_wall_uv_scale, ux, uz, k_wall_abgr);
-			// Far jamb (at t1). Outward normal faces into the opening (-ascent direction).
-			emit_vertical_quad(out, p1_right, p1_left, w.y0, head_y,
-				0.0f, w.thickness * k_wall_uv_scale, -ux, -uz, k_wall_abgr);
-			// Door head — ceiling inside the opening, facing down.
-			emit_horizontal_quad(out, p0_left, p1_left, p1_right, p0_right, head_y, -1.0f, k_wall_abgr);
+			const float t_off = br_off / horiz_len;
+			const float t_end = br_end / horiz_len;
+			const float hw_u = hw_y / horiz_len;
+
+			// Left and right jambs: straddle horizontal edges, extend past opening corners
+			emit_frame_strip(t_off - hw_u, t_off + hw_u, br_y0 - hw_y, br_y1 + hw_y);
+			emit_frame_strip(t_end - hw_u, t_end + hw_u, br_y0 - hw_y, br_y1 + hw_y);
+
+			// Header: fits between jambs, straddles the top edge
+			emit_frame_strip(t_off + hw_u, t_end - hw_u, br_y1 - hw_y, br_y1 + hw_y);
+
+			// Sill: only for windows (opening not starting at wall base)
+			if (br_y0 > base_y + 1e-6f) {
+				emit_frame_strip(t_off + hw_u, t_end - hw_u, br_y0 - hw_y, br_y0 + hw_y);
+			}
 		}
 	}
 }
@@ -362,9 +290,6 @@ void emit_stair_step_box(
 	float y_bottom, float y_top,
 	bool emit_back)
 {
-	// Corners (CCW top-down layout): a0 = near-left, b0 = near-right, b1 = far-right, a1 = far-left.
-	// "Near" = previous step, "Far" = next step (ascending direction).
-	// Emit: top (+Y), front (-ascent_dir side), left, right, and optionally back.
 	const auto add = [&](float x, float y, float z, float nx, float ny, float nz, uint32_t abgr) {
 		push_v(out, x, y, z, nx, ny, nz,
 			x * k_floor_uv_per_world, z * k_floor_uv_per_world, abgr);
@@ -378,19 +303,15 @@ void emit_stair_step_box(
 	add(a1.x, y_top, a1.z, 0, 1, 0, k_stair_abgr);
 	add(b1.x, y_top, b1.z, 0, 1, 0, k_stair_abgr);
 
-	// Front riser at y_bottom..y_top along edge a0-b0. Normal = away from step top (toward -ascent).
-	const float dx_f = b0.x - a0.x;
-	const float dz_f = b0.z - a0.z;
-	const float len_f = std::sqrt(dx_f * dx_f + dz_f * dz_f);
-	// Direction from a0->a1 is ascent; perpendicular rotated is (-dz_asc, 0, dx_asc).
+	// Front riser
 	const float ax = a1.x - a0.x;
 	const float az = a1.z - a0.z;
 	const float la = std::sqrt(ax * ax + az * az);
 	const float ascent_x = la > 1e-6f ? ax / la : 0.0f;
 	const float ascent_z = la > 1e-6f ? az / la : 0.0f;
-	// Front face normal is -ascent direction.
 	const float fn_x = -ascent_x;
 	const float fn_z = -ascent_z;
+	const float len_f = std::sqrt((b0.x - a0.x) * (b0.x - a0.x) + (b0.z - a0.z) * (b0.z - a0.z));
 	if (len_f > 1e-6f && y_top > y_bottom) {
 		const uint32_t abgr = k_stair_abgr;
 		add(a0.x, y_bottom, a0.z, fn_x, 0, fn_z, abgr);
@@ -401,45 +322,41 @@ void emit_stair_step_box(
 		add(a0.x, y_top, a0.z, fn_x, 0, fn_z, abgr);
 	}
 
-	// Side faces (perpendicular sides from a0->a1 on the left, and b0->b1 on the right).
-	// Side normals are perpendicular to ascent, pointing outward.
-	// Left side normal = -perpendicular(ascent) = (-(-ascent_z), 0, -ascent_x) = (ascent_z, 0, -ascent_x)
-	// Hmm, perpendicular(ascent) rotated 90deg CCW: (-ascent_z, 0, ascent_x)
-	// Left side (from a0 side, not from b0 side) faces -perp = (ascent_z, 0, -ascent_x).
+	// Left side face
 	{
-		const float nx = ascent_z;
-		const float nz = -ascent_x;
+		const float snx = ascent_z;
+		const float snz = -ascent_x;
 		const uint32_t abgr = k_stair_abgr;
-		add(a0.x, y_bottom, a0.z, nx, 0, nz, abgr);
-		add(a0.x, y_top, a0.z, nx, 0, nz, abgr);
-		add(a1.x, y_top, a1.z, nx, 0, nz, abgr);
-		add(a0.x, y_bottom, a0.z, nx, 0, nz, abgr);
-		add(a1.x, y_top, a1.z, nx, 0, nz, abgr);
-		add(a1.x, y_bottom, a1.z, nx, 0, nz, abgr);
+		add(a0.x, y_bottom, a0.z, snx, 0, snz, abgr);
+		add(a0.x, y_top, a0.z, snx, 0, snz, abgr);
+		add(a1.x, y_top, a1.z, snx, 0, snz, abgr);
+		add(a0.x, y_bottom, a0.z, snx, 0, snz, abgr);
+		add(a1.x, y_top, a1.z, snx, 0, snz, abgr);
+		add(a1.x, y_bottom, a1.z, snx, 0, snz, abgr);
 	}
+	// Right side face
 	{
-		const float nx = -ascent_z;
-		const float nz = ascent_x;
+		const float snx = -ascent_z;
+		const float snz = ascent_x;
 		const uint32_t abgr = k_stair_abgr;
-		add(b0.x, y_bottom, b0.z, nx, 0, nz, abgr);
-		add(b1.x, y_top, b1.z, nx, 0, nz, abgr);
-		add(b0.x, y_top, b0.z, nx, 0, nz, abgr);
-		add(b0.x, y_bottom, b0.z, nx, 0, nz, abgr);
-		add(b1.x, y_bottom, b1.z, nx, 0, nz, abgr);
-		add(b1.x, y_top, b1.z, nx, 0, nz, abgr);
+		add(b0.x, y_bottom, b0.z, snx, 0, snz, abgr);
+		add(b1.x, y_top, b1.z, snx, 0, snz, abgr);
+		add(b0.x, y_top, b0.z, snx, 0, snz, abgr);
+		add(b0.x, y_bottom, b0.z, snx, 0, snz, abgr);
+		add(b1.x, y_bottom, b1.z, snx, 0, snz, abgr);
+		add(b1.x, y_top, b1.z, snx, 0, snz, abgr);
 	}
 
 	if (emit_back) {
-		// Back face (far side, ascent direction facing).
-		const float nx = ascent_x;
-		const float nz = ascent_z;
+		const float snx = ascent_x;
+		const float snz = ascent_z;
 		const uint32_t abgr = k_stair_abgr;
-		add(a1.x, y_bottom, a1.z, nx, 0, nz, abgr);
-		add(a1.x, y_top, a1.z, nx, 0, nz, abgr);
-		add(b1.x, y_top, b1.z, nx, 0, nz, abgr);
-		add(a1.x, y_bottom, a1.z, nx, 0, nz, abgr);
-		add(b1.x, y_top, b1.z, nx, 0, nz, abgr);
-		add(b1.x, y_bottom, b1.z, nx, 0, nz, abgr);
+		add(a1.x, y_bottom, a1.z, snx, 0, snz, abgr);
+		add(a1.x, y_top, a1.z, snx, 0, snz, abgr);
+		add(b1.x, y_top, b1.z, snx, 0, snz, abgr);
+		add(a1.x, y_bottom, a1.z, snx, 0, snz, abgr);
+		add(b1.x, y_top, b1.z, snx, 0, snz, abgr);
+		add(b1.x, y_bottom, b1.z, snx, 0, snz, abgr);
 	}
 }
 
@@ -453,7 +370,6 @@ void emit_stair(std::vector<LitVertex>& out, const Stair& s)
 	}
 	const float ax = dx / len;
 	const float az = dz / len;
-	// Perpendicular unit vector (rotated 90 CCW, in XZ): (-az, 0, ax)
 	const float px = -az;
 	const float pz = ax;
 	const float half_w = 0.5f * s.width;
@@ -475,6 +391,20 @@ void emit_stair(std::vector<LitVertex>& out, const Stair& s)
 	}
 }
 
+/// Emit a horizontal quad (header or sill between paired walls) with a Y-axis normal.
+void emit_horizontal_quad(
+	std::vector<LitVertex>& out,
+	Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3,
+	float y, float ny, uint32_t abgr)
+{
+	push_v(out, p0.x, y, p0.z, 0.f, ny, 0.f, p0.x * k_floor_uv_per_world, p0.z * k_floor_uv_per_world, abgr);
+	push_v(out, p1.x, y, p1.z, 0.f, ny, 0.f, p1.x * k_floor_uv_per_world, p1.z * k_floor_uv_per_world, abgr);
+	push_v(out, p2.x, y, p2.z, 0.f, ny, 0.f, p2.x * k_floor_uv_per_world, p2.z * k_floor_uv_per_world, abgr);
+	push_v(out, p0.x, y, p0.z, 0.f, ny, 0.f, p0.x * k_floor_uv_per_world, p0.z * k_floor_uv_per_world, abgr);
+	push_v(out, p2.x, y, p2.z, 0.f, ny, 0.f, p2.x * k_floor_uv_per_world, p2.z * k_floor_uv_per_world, abgr);
+	push_v(out, p3.x, y, p3.z, 0.f, ny, 0.f, p3.x * k_floor_uv_per_world, p3.z * k_floor_uv_per_world, abgr);
+}
+
 } // namespace
 
 void build_level_meshes(const Level& level, LevelMeshOutput& out)
@@ -486,9 +416,90 @@ void build_level_meshes(const Level& level, LevelMeshOutput& out)
 	for (const Sector& s : level.sectors) {
 		emit_sector_floor_and_ceiling(out.floor_vertices, s);
 	}
-	for (const Wall& w : level.walls) {
-		emit_wall(out.wall_vertices, w);
+
+	// Group brushes by wall index for O(walls) dispatch.
+	std::vector<std::vector<const Brush*>> wall_brushes(level.walls.size());
+	for (const Brush& br : level.brushes) {
+		if (br.wall >= 0 && br.wall < static_cast<int>(level.walls.size())) {
+			wall_brushes[static_cast<size_t>(br.wall)].push_back(&br);
+		}
 	}
+
+	for (size_t i = 0; i < level.walls.size(); ++i) {
+		emit_wall(out.wall_vertices, level.walls[i], wall_brushes[i]);
+	}
+
+	// Depth panels: close the gap between paired parallel-wall openings.
+	// Two brushes are "paired" when their world-space opening edges are within
+	// k_pair_tol of each other — produced by the editor carving both faces of a thick wall.
+	{
+		struct BrushEdge {
+			Vec2 left, right;
+			float y0, y1, base_y;
+			float ux, uz;
+			int wall_idx;
+		};
+
+		std::vector<BrushEdge> bedges;
+		bedges.reserve(level.brushes.size());
+		for (const Brush& br : level.brushes) {
+			if (br.wall < 0 || br.wall >= static_cast<int>(level.walls.size())) continue;
+			const Wall& w = level.walls[static_cast<size_t>(br.wall)];
+			const float ddx = w.b.x - w.a.x, ddz = w.b.z - w.a.z;
+			const float llen = std::sqrt(ddx * ddx + ddz * ddz);
+			if (llen < 1e-6f) continue;
+			const float uux = ddx / llen, uuz = ddz / llen;
+			BrushEdge e;
+			e.left  = {w.a.x + uux * br.offset,               w.a.z + uuz * br.offset};
+			e.right = {w.a.x + uux * (br.offset + br.width),  w.a.z + uuz * (br.offset + br.width)};
+			e.y0 = br.y_start;  e.y1 = br.y_start + br.height;
+			e.base_y = w.a.y;
+			e.ux = uux;  e.uz = uuz;
+			e.wall_idx = br.wall;
+			bedges.push_back(e);
+		}
+
+		constexpr float k_pair_tol_sq = 0.35f * 0.35f;
+		const auto dsq = [](Vec2 p, Vec2 q) {
+			return (p.x - q.x) * (p.x - q.x) + (p.z - q.z) * (p.z - q.z);
+		};
+
+		std::vector<bool> used(bedges.size(), false);
+		for (size_t i = 0; i < bedges.size(); ++i) {
+			if (used[i]) continue;
+			for (size_t j = i + 1; j < bedges.size(); ++j) {
+				if (used[j]) continue;
+				const BrushEdge& e1 = bedges[i];
+				const BrushEdge& e2 = bedges[j];
+				if (e1.wall_idx == e2.wall_idx) continue;
+				if (dsq(e1.left,  e2.left)  > k_pair_tol_sq) continue;
+				if (dsq(e1.right, e2.right) > k_pair_tol_sq) continue;
+				const float y0 = std::max(e1.y0, e2.y0);
+				const float y1 = std::min(e1.y1, e2.y1);
+				if (y1 <= y0 + 1e-6f) continue;
+
+				const float depth   = std::sqrt(dsq(e1.left, e2.left));
+				const float u_depth = depth * k_wall_uv_scale;
+
+				// Left jamb: vertical fill at the opening's left edge, facing into the passage
+				emit_vertical_quad(out.wall_vertices, e1.left,  e2.left,  y0, y1, 0.f, u_depth,  e1.ux,  e1.uz, k_frame_abgr);
+				// Right jamb: vertical fill at the opening's right edge
+				emit_vertical_quad(out.wall_vertices, e2.right, e1.right, y0, y1, 0.f, u_depth, -e1.ux, -e1.uz, k_frame_abgr);
+				// Header: horizontal cap closing the top of the opening gap
+				emit_horizontal_quad(out.wall_vertices, e1.left, e1.right, e2.right, e2.left, y1, -1.f, k_frame_abgr);
+
+				// Sill: only for windows (opening not flush with wall base)
+				const bool is_window = e1.y0 > e1.base_y + 1e-6f || e2.y0 > e2.base_y + 1e-6f;
+				if (is_window) {
+					emit_horizontal_quad(out.wall_vertices, e2.left, e2.right, e1.right, e1.left, y0, 1.f, k_frame_abgr);
+				}
+
+				used[i] = used[j] = true;
+				break;
+			}
+		}
+	}
+
 	for (const Stair& s : level.stairs) {
 		emit_stair(out.stair_vertices, s);
 	}

@@ -1,19 +1,15 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace engine {
 
-/// Canonical in-memory level representation (v2). Doom/Quake-style: 2D sector polygons on the
-/// XZ plane define walkable areas, zero-thickness wall segments define visual + collision
-/// boundaries, and explicit stair ramps connect sectors at different Y. Coordinates are
-/// world-space meters (no cell/grid units). Axes: +X east, +Y up, +Z south.
-///
-/// JSON schema (see src/json_level.cpp) and .evil binary format (see src/level_binary.cpp)
-/// both parse into this structure.
+/// Canonical in-memory level representation (v3). Sector polygons on the XZ plane define
+/// walkable areas. Walls are simple planar quads defined by two 3-D base points and a height;
+/// `Brush` entries carve rectangular openings (CSG-style). Stairs connect sectors at different Y.
+/// Axes: +X east, +Y up, +Z south.
 
 struct Vec2 {
 	float x = 0.0f;
@@ -27,52 +23,42 @@ struct Vec3 {
 };
 
 /// A sector is a polygonal region in the XZ plane with its own floor/ceiling elevation.
-/// `polygon` winding is expected counter-clockwise when viewed from above (+Y looking down);
-/// the loader reverses inward-wound polygons automatically.
+/// Polygon winding is counter-clockwise viewed from above (+Y); the loader auto-fixes CW input.
 struct Sector {
-	std::string id;               ///< Optional name (e.g. "main_hall"); may be empty.
-	std::vector<Vec2> polygon;    ///< >= 3 points; implicit close from last → first.
+	std::string id;
+	std::vector<Vec2> polygon;
 	float floor_y = 0.0f;
 	float ceiling_y = 3.2f;
 };
 
-enum class WallType : uint8_t {
-	Normal = 0,   ///< Full-height solid wall segment.
-	Door = 1,     ///< Wall with a door-shaped cutout (a rectangular opening).
-	Broken = 2,   ///< Half-height remnant (visual cover, not walkable).
-	Window = 3,   ///< Wall with a mid-height slit opening.
-};
-
-bool wall_type_from_string(const std::string& s, WallType& out);
-const char* wall_type_to_string(WallType t);
-
-/// A wall is a zero-thickness line segment in the XZ plane. Visual + collision.
-/// For `Door` variants: `door_width` is the opening width along the segment; `door_offset`
-/// is the distance from endpoint `a` to the near edge of the opening. `door_height` is the
-/// opening's height above `y0`.
+/// A wall is a planar quad. `a` and `b` are the 3-D base points (bottom edge); the quad rises
+/// `height` metres straight up. Parallel walls give visual thickness. Use `Level::brushes` to
+/// carve door/window openings.
 struct Wall {
-	WallType type = WallType::Normal;
-	Vec2 a;
-	Vec2 b;
-	float y0 = 0.0f;              ///< Bottom of wall in world Y.
-	float y1 = 3.2f;              ///< Top of wall in world Y.
-	float thickness = 0.2f;       ///< Visual thickness perpendicular to the segment (meters).
-	float door_width = 1.2f;      ///< Only meaningful when type == Door.
-	float door_offset = -1.0f;    ///< < 0 means "center the opening along the segment".
-	float door_height = 2.2f;     ///< Height of the opening above y0.
+	Vec3 a;
+	Vec3 b;
+	float height = 3.2f;
 };
 
-/// A stair is a rectangular ramp whose top surface rises linearly from `from_y` at endpoint
-/// `center_a` to `to_y` at endpoint `center_b`. `width` is perpendicular full width (total,
-/// not half). Collision/Y-interpolation treats the stair as a planar ramp; rendering optionally
-/// emits discrete step boxes for the classic RE/Doom look (see `steps`).
+/// A rectangular opening carved into a wall. `wall` indexes into `Level::walls`.
+/// `offset` is the distance along the wall from `a` to the near edge of the opening.
+/// `y_start` is the world-Y of the opening bottom; `height` is the vertical extent.
+struct Brush {
+	int wall = 0;
+	float offset = 0.0f;
+	float width = 1.2f;
+	float y_start = 0.0f;
+	float height = 2.2f;
+};
+
+/// A stair ramp whose top surface rises from `from_y` at `center_a` to `to_y` at `center_b`.
+/// `width` is the full perpendicular width. `steps` controls how many discrete step boxes render.
 struct Stair {
 	Vec2 center_a;
 	Vec2 center_b;
 	float width = 2.0f;
 	float from_y = 0.0f;
 	float to_y = 3.2f;
-	/// Number of discrete steps to emit visually. <= 1 means a smooth ramp.
 	int steps = 8;
 };
 
@@ -88,18 +74,19 @@ struct Spawn {
 };
 
 struct Level {
-	int version = 2;
+	int version = 3;
 	std::string name;
-	float wall_height = 3.2f;     ///< Default for walls that don't set y0/y1 explicitly.
+	float wall_height = 3.2f;
 	std::array<float, 3> ambient = {0.07f, 0.08f, 0.11f};
 	Spawn spawn;
 	std::vector<Sector> sectors;
 	std::vector<Wall> walls;
+	std::vector<Brush> brushes;
 	std::vector<Stair> stairs;
 	std::vector<Light> lights;
 };
 
-/// Signed area of a 2D polygon (shoelace). Positive → counter-clockwise winding.
+/// Signed area of a 2-D polygon (shoelace). Positive → counter-clockwise winding.
 float polygon_signed_area(const std::vector<Vec2>& poly);
 
 /// True if `p` lies inside `poly` (ray casting; boundary undefined).

@@ -129,40 +129,46 @@ bool parse_sector(const json& js, float default_wall_height, Sector& out, std::s
 
 bool parse_wall(const json& jw, float default_wall_height, Wall& out, std::string& err)
 {
-	std::string type_s = "normal";
-	if (jw.contains("type") && jw.at("type").is_string()) {
-		type_s = jw.at("type").get<std::string>();
-	}
-	if (!wall_type_from_string(type_s, out.type)) {
-		err = std::string("unknown wall type '") + type_s + "'";
-		return false;
-	}
 	if (!jw.contains("a") || !jw.contains("b")) {
 		err = "wall missing 'a' or 'b'";
 		return false;
 	}
-	if (!parse_vec2(jw.at("a"), out.a) || !parse_vec2(jw.at("b"), out.b)) {
-		err = "wall 'a'/'b' must be [x, z]";
+	if (!parse_vec3(jw.at("a"), out.a) || !parse_vec3(jw.at("b"), out.b)) {
+		err = "wall 'a'/'b' must be [x, y, z]";
 		return false;
 	}
-	out.y0 = 0.0f;
-	out.y1 = default_wall_height;
-	get_float(jw, "y0", out.y0);
-	get_float(jw, "y1", out.y1);
-	if (out.y1 <= out.y0) {
-		err = "wall y1 must be > y0";
+	out.height = default_wall_height;
+	get_float(jw, "height", out.height);
+	if (out.height <= 0.0f) {
+		err = "wall height must be > 0";
 		return false;
 	}
-	out.thickness = 0.2f;
-	get_float(jw, "thickness", out.thickness);
-	if (out.thickness < 0.0f) out.thickness = 0.0f;
+	return true;
+}
 
-	out.door_width = 1.2f;
-	out.door_offset = -1.0f;
-	out.door_height = 2.2f;
-	get_float(jw, "door_width", out.door_width);
-	get_float(jw, "door_offset", out.door_offset);
-	get_float(jw, "door_height", out.door_height);
+bool parse_brush(const json& jb, Brush& out, std::string& err)
+{
+	if (!jb.contains("wall") || !jb.at("wall").is_number_integer()) {
+		err = "brush missing integer 'wall' index";
+		return false;
+	}
+	out.wall = jb.at("wall").get<int>();
+	out.offset = 0.0f;
+	out.width = 1.2f;
+	out.y_start = 0.0f;
+	out.height = 2.2f;
+	get_float(jb, "offset", out.offset);
+	get_float(jb, "width", out.width);
+	get_float(jb, "y_start", out.y_start);
+	get_float(jb, "height", out.height);
+	if (out.width <= 0.0f) {
+		err = "brush width must be > 0";
+		return false;
+	}
+	if (out.height <= 0.0f) {
+		err = "brush height must be > 0";
+		return false;
+	}
 	return true;
 }
 
@@ -188,9 +194,9 @@ bool parse_stair(const json& js, Stair& out, std::string& err)
 		err = "stair width must be > 0";
 		return false;
 	}
-	const float dx = out.center_b.x - out.center_a.x;
-	const float dz = out.center_b.z - out.center_a.z;
-	if (dx * dx + dz * dz <= 1e-6f) {
+	const float ddx = out.center_b.x - out.center_a.x;
+	const float ddz = out.center_b.z - out.center_a.z;
+	if (ddx * ddx + ddz * ddz <= 1e-6f) {
 		err = "stair center_a and center_b must differ";
 		return false;
 	}
@@ -233,6 +239,10 @@ bool parse_json_level(const std::string& text, Level& out, std::string& err)
 	}
 
 	get_int(j, "version", out.version);
+	if (out.version != 3) {
+		err = std::string("expected version 3, got ") + std::to_string(out.version);
+		return false;
+	}
 	if (j.contains("name") && j.at("name").is_string()) {
 		out.name = j.at("name").get<std::string>();
 	}
@@ -276,6 +286,20 @@ bool parse_json_level(const std::string& text, Level& out, std::string& err)
 				return false;
 			}
 			out.walls.push_back(w);
+		}
+	}
+
+	if (j.contains("brushes") && j.at("brushes").is_array()) {
+		const json& jbs = j.at("brushes");
+		out.brushes.reserve(jbs.size());
+		for (size_t i = 0; i < jbs.size(); ++i) {
+			Brush b;
+			std::string berr;
+			if (!parse_brush(jbs[i], b, berr)) {
+				err = std::string("brushes[") + std::to_string(i) + "]: " + berr;
+				return false;
+			}
+			out.brushes.push_back(b);
 		}
 	}
 

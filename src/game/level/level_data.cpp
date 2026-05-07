@@ -2,38 +2,6 @@
 
 namespace engine {
 
-bool wall_type_from_string(const std::string& s, WallType& out)
-{
-	if (s == "normal" || s == "normal_wall" || s == "solid") {
-		out = WallType::Normal;
-		return true;
-	}
-	if (s == "door" || s == "door_wall") {
-		out = WallType::Door;
-		return true;
-	}
-	if (s == "broken" || s == "broken_wall") {
-		out = WallType::Broken;
-		return true;
-	}
-	if (s == "window" || s == "window_wall") {
-		out = WallType::Window;
-		return true;
-	}
-	return false;
-}
-
-const char* wall_type_to_string(WallType t)
-{
-	switch (t) {
-	case WallType::Normal: return "normal";
-	case WallType::Door: return "door";
-	case WallType::Broken: return "broken";
-	case WallType::Window: return "window";
-	}
-	return "normal";
-}
-
 float polygon_signed_area(const std::vector<Vec2>& poly)
 {
 	const size_t n = poly.size();

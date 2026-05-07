@@ -13,11 +13,11 @@ namespace {
 constexpr float k_no_surface = -std::numeric_limits<float>::infinity();
 
 struct SegProj {
-	float t;           ///< Parameter along segment (0 at a, 1 at b), unclamped.
-	float t_clamped;   ///< Clamped to [0, 1].
-	float dist;        ///< Distance from point to closest-on-segment (clamped).
-	float cx;          ///< Closest point X (clamped).
-	float cz;          ///< Closest point Z (clamped).
+	float t;
+	float t_clamped;
+	float dist;
+	float cx;
+	float cz;
 };
 
 SegProj project_to_segment(Vec2 a, Vec2 b, float px, float pz)
@@ -43,47 +43,42 @@ SegProj project_to_segment(Vec2 a, Vec2 b, float px, float pz)
 	return r;
 }
 
-/// True if a Door wall lets the player pass through at the closest point. We check only the
-/// horizontal door opening window along the segment; vertical fit is assumed (door_height is
-/// always >= player eye height in typical mansions).
-bool wall_is_passable(const Wall& w, const SegProj& proj, float feet_y)
+/// True if the wall's vertical span overlaps the player body (feet to eye).
+bool wall_spans_body(const Wall& w, float feet_y)
 {
-	if (w.type != WallType::Door) {
-		return false;
-	}
+	const float head_y = feet_y + PlayerPhysics::k_eye_height;
+	const float wall_top = w.a.y + w.height;
+	return wall_top > feet_y && w.a.y < head_y;
+}
+
+/// True if a brush on wall `wall_idx` makes the wall passable at the player's current position
+/// (parametric `proj.t_clamped`) and vertical position (`feet_y`).
+bool wall_is_passable(int wall_idx, const Wall& w, const Level& level,
+	const SegProj& proj, float feet_y)
+{
 	const float dx = w.b.x - w.a.x;
 	const float dz = w.b.z - w.a.z;
 	const float len = std::sqrt(dx * dx + dz * dz);
 	if (len <= 1e-6f) {
 		return false;
 	}
-	const float door_top = w.y0 + w.door_height;
-	if (feet_y < w.y0 - 0.1f || feet_y + PlayerPhysics::k_eye_height > door_top + 0.2f) {
-		// Feet below bottom of door or head above top of door: blocked.
-		return false;
-	}
-	float door_off = w.door_offset;
-	float door_w = w.door_width;
-	if (door_w > len) door_w = len;
-	if (door_off < 0.0f) door_off = 0.5f * (len - door_w);
-	if (door_off < 0.0f) door_off = 0.0f;
-	if (door_off + door_w > len) door_off = len - door_w;
-	const float t0 = door_off / len;
-	const float t1 = (door_off + door_w) / len;
-	return proj.t_clamped > t0 && proj.t_clamped < t1;
-}
-
-/// True if the wall's vertical span overlaps the player's body (feet to eye). Walls whose span
-/// is entirely above the player's head or below the player's feet don't collide horizontally.
-bool wall_spans_body(const Wall& w, float feet_y)
-{
+	const float pos_along = proj.t_clamped * len;
 	const float head_y = feet_y + PlayerPhysics::k_eye_height;
-	return w.y1 > feet_y && w.y0 < head_y;
+
+	for (const Brush& br : level.brushes) {
+		if (br.wall != wall_idx) {
+			continue;
+		}
+		const float br_end = br.offset + br.width;
+		const float br_top = br.y_start + br.height;
+		if (pos_along >= br.offset - 1e-3f && pos_along <= br_end + 1e-3f
+			&& feet_y >= br.y_start - 0.1f && head_y <= br_top + 0.2f) {
+			return true;
+		}
+	}
+	return false;
 }
 
-/// Walkable surface Y at (wx, wz) if the point is over a stair rectangle. Returns k_no_surface
-/// otherwise. Y matches the discrete step tops emitted by the mesh builder (so feet snap onto
-/// each step rather than sliding on a smooth ramp that would clip into the rendered stairs).
 float stair_surface_y_at(const Stair& s, float wx, float wz)
 {
 	const float dx = s.center_b.x - s.center_a.x;
@@ -111,7 +106,6 @@ float stair_surface_y_at(const Stair& s, float wx, float wz)
 	return s.from_y + (s.to_y - s.from_y) * top_t;
 }
 
-/// The highest walkable surface at (wx, wz) whose top is <= max_y. Returns k_no_surface if none.
 float highest_walkable_surface(const Level& level, float wx, float wz, float max_y)
 {
 	float best = k_no_surface;
@@ -142,18 +136,18 @@ bool body_hits_any_wall(
 	float feet_y,
 	float radius)
 {
-	for (const Wall& w : level.walls) {
+	for (int i = 0; i < static_cast<int>(level.walls.size()); ++i) {
+		const Wall& w = level.walls[static_cast<size_t>(i)];
 		if (!wall_spans_body(w, feet_y)) {
 			continue;
 		}
-		const SegProj proj = project_to_segment(w.a, w.b, px, pz);
-		// Walls have visual thickness; inflate the collision radius so the player stops at the
-		// outer face rather than clipping into the wall side.
-		const float effective_radius = radius + 0.5f * w.thickness;
-		if (proj.dist >= effective_radius) {
+		const Vec2 wa{w.a.x, w.a.z};
+		const Vec2 wb{w.b.x, w.b.z};
+		const SegProj proj = project_to_segment(wa, wb, px, pz);
+		if (proj.dist >= radius) {
 			continue;
 		}
-		if (wall_is_passable(w, proj, feet_y)) {
+		if (wall_is_passable(i, w, level, proj, feet_y)) {
 			continue;
 		}
 		return true;
@@ -161,11 +155,6 @@ bool body_hits_any_wall(
 	return false;
 }
 
-/// True if (wx, wz) has walkable structure overhead (sector floor or stair) but none of those
-/// surfaces is reachable from `feet_y` within `step_up`. Stairs and sectors count equally: if
-/// ANY walkable surface at this point is reachable, movement is allowed (e.g. walking onto a
-/// stair cell whose step is climbable even though the sector floor above is not). Empty void
-/// (no sector, no stair) does not block — the player falls naturally.
 bool cliff_blocks_climb(const Level& level, float wx, float wz, float feet_y, float step_up)
 {
 	const Vec2 p{wx, wz};

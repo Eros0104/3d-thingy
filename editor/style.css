@@ -123,7 +123,8 @@ button.primary { background: var(--accent); color: #0b0c10; border-color: var(--
 
 .hint { font-size: 10px; color: var(--muted); margin: 6px 0 0 0; line-height: 1.4; }
 
-.selection-info { font-size: 11px; color: var(--accent); white-space: pre; }
+.selection-info { font-size: 11px; color: var(--accent); }
+.btn-row { display: flex; gap: 4px; margin: 4px 0; }
 
 .counts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; font-size: 11px; color: var(--muted); }
 

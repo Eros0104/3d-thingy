@@ -6,33 +6,26 @@
 
 namespace engine {
 
-/// Parse a v2 .json level file at `path` into `out`. Returns false and fills `err` on any
+/// Parse a v3 .json level file at `path` into `out`. Returns false and fills `err` on any
 /// validation failure. Schema (informal):
 ///
 /// {
-///   "version": 2,
+///   "version": 3,
 ///   "name": "<level name>",
-///   "wall_height": 3.2,                  // default for walls (y0=0, y1=wall_height)
+///   "wall_height": 3.2,          // default height for walls that omit the field
 ///   "ambient": [r, g, b],
 ///   "spawn": { "pos": [x, y, z], "yaw_deg": 0 },
 ///   "sectors": [
-///     {
-///       "id": "main_hall",               // optional
-///       "polygon": [[x, z], [x, z], ...],
-///       "floor_y": 0.0,
-///       "ceiling_y": 3.2
-///     }
+///     { "id": "main_hall", "polygon": [[x, z], ...], "floor_y": 0, "ceiling_y": 3.2 }
 ///   ],
 ///   "walls": [
-///     { "type": "normal", "a": [x, z], "b": [x, z] },
-///     { "type": "door", "a": [x, z], "b": [x, z],
-///       "door_width": 1.2, "door_offset": null, "door_height": 2.2 },
-///     { "type": "broken", "a": [x, z], "b": [x, z] },
-///     { "type": "window", "a": [x, z], "b": [x, z] }
+///     { "a": [x, y, z], "b": [x, y, z], "height": 3.2 }
+///   ],
+///   "brushes": [
+///     { "wall": 0, "offset": 1.9, "width": 1.2, "y_start": 0.0, "height": 2.2 }
 ///   ],
 ///   "stairs": [
-///     { "center_a": [x, z], "center_b": [x, z],
-///       "width": 2.0, "from_y": 0.0, "to_y": 3.2, "steps": 8 }
+///     { "center_a": [x, z], "center_b": [x, z], "width": 2.0, "from_y": 0, "to_y": 3.2, "steps": 8 }
 ///   ],
 ///   "lights": [
 ///     { "pos": [x, y, z], "color": [r, g, b], "intensity": 1.0 }
