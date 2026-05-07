@@ -395,32 +395,6 @@
     },
     {
       "a": [
-        8,
-        0,
-        6
-      ],
-      "b": [
-        8,
-        0,
-        0
-      ],
-      "height": 3.2
-    },
-    {
-      "a": [
-        7.8,
-        0,
-        0
-      ],
-      "b": [
-        7.8,
-        0,
-        6
-      ],
-      "height": 3.2
-    },
-    {
-      "a": [
         0,
         0,
         6
@@ -473,14 +447,40 @@
     },
     {
       "a": [
+        8,
+        0,
+        0
+      ],
+      "b": [
+        8,
+        0,
+        6
+      ],
+      "height": 3.2
+    },
+    {
+      "a": [
+        7.8,
+        0,
+        0
+      ],
+      "b": [
+        7.8,
+        0,
+        6
+      ],
+      "height": 3.2
+    },
+    {
+      "a": [
+        8,
+        0,
+        14
+      ],
+      "b": [
         8,
         0,
         22
-      ],
-      "b": [
-        8,
-        0,
-        14
       ],
       "height": 3.2
     },
@@ -500,17 +500,9 @@
   ],
   "brushes": [
     {
-      "kind": "window",
-      "wall": 1,
-      "offset": 0,
-      "width": 4,
-      "y_start": 1.2,
-      "height": 0.9
-    },
-    {
       "kind": "door",
       "wall": 17,
-      "offset": 2.9,
+      "offset": 3.4,
       "width": 1.2,
       "y_start": 0,
       "height": 2.2
@@ -518,7 +510,23 @@
     {
       "kind": "door",
       "wall": 18,
-      "offset": 1.9,
+      "offset": 11.4,
+      "width": 1.2,
+      "y_start": 0,
+      "height": 2.2
+    },
+    {
+      "kind": "door",
+      "wall": 17,
+      "offset": 11.4,
+      "width": 1.2,
+      "y_start": 0,
+      "height": 2.2
+    },
+    {
+      "kind": "door",
+      "wall": 18,
+      "offset": 3.4,
       "width": 1.2,
       "y_start": 0,
       "height": 2.2
@@ -526,22 +534,6 @@
     {
       "kind": "door",
       "wall": 19,
-      "offset": 3.4,
-      "width": 1.2,
-      "y_start": 0,
-      "height": 2.2
-    },
-    {
-      "kind": "door",
-      "wall": 20,
-      "offset": 11.4,
-      "width": 1.2,
-      "y_start": 0,
-      "height": 2.2
-    },
-    {
-      "kind": "door",
-      "wall": 19,
       "offset": 11.4,
       "width": 1.2,
       "y_start": 0,
@@ -556,20 +548,28 @@
       "height": 2.2
     },
     {
-      "kind": "door",
-      "wall": 21,
-      "offset": 11.4,
-      "width": 1.2,
-      "y_start": 0,
-      "height": 2.2
+      "kind": "window",
+      "wall": 1,
+      "offset": 1.5,
+      "width": 1,
+      "y_start": 1.2,
+      "height": 0.9
     },
     {
-      "kind": "door",
-      "wall": 22,
-      "offset": 3.4,
-      "width": 1.2,
-      "y_start": 0,
-      "height": 2.2
+      "kind": "window",
+      "wall": 23,
+      "offset": 2.5,
+      "width": 1,
+      "y_start": 1.2,
+      "height": 0.9
+    },
+    {
+      "kind": "window",
+      "wall": 24,
+      "offset": 2.5,
+      "width": 1,
+      "y_start": 1.2,
+      "height": 0.9
     },
     {
       "kind": "window",
@@ -582,26 +582,26 @@
     {
       "kind": "window",
       "wall": 24,
-      "offset": 2,
+      "offset": 5,
       "width": 1,
       "y_start": 1.2,
       "height": 0.9
     },
     {
-      "kind": "window",
-      "wall": 23,
-      "offset": 1.5,
-      "width": 1,
-      "y_start": 1.2,
-      "height": 0.9
+      "kind": "door",
+      "wall": 21,
+      "offset": 2.4,
+      "width": 1.2,
+      "y_start": 0,
+      "height": 2.2
     },
     {
-      "kind": "window",
-      "wall": 24,
-      "offset": 5.5,
-      "width": 1,
-      "y_start": 1.2,
-      "height": 0.9
+      "kind": "door",
+      "wall": 22,
+      "offset": 2.4,
+      "width": 1.2,
+      "y_start": 0,
+      "height": 2.2
     }
   ],
   "stairs": [
