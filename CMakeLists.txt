@@ -66,6 +66,7 @@ add_subdirectory("${bgfx_cmake_SOURCE_DIR}" "${bgfx_cmake_BINARY_DIR}")
 
 include("${bgfx_cmake_SOURCE_DIR}/cmake/bgfxToolUtils.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/engine_shaders.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/engine_textures.cmake")
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
@@ -192,3 +193,10 @@ if(APPLE)
 endif()
 
 engine_add_triangle_shaders(fps_engine)
+
+set(_TEX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/textures")
+engine_embed_texture(fps_engine "${_TEX_DIR}/woodfloor/WoodFloor048_2K-JPG_Color.jpg"     woodfloor_color)
+engine_embed_texture(fps_engine "${_TEX_DIR}/woodfloor/WoodFloor048_2K-JPG_NormalGL.jpg"  woodfloor_normal)
+engine_embed_texture(fps_engine "${_TEX_DIR}/woodfloor/WoodFloor048_2K-JPG_Roughness.jpg" woodfloor_roughness)
+engine_embed_texture(fps_engine "${_TEX_DIR}/plastered_wall_04_diff_2k.jpg"               wall_albedo)
+engine_embed_texture(fps_engine "${_TEX_DIR}/bullet_hole.png"                             bullet_hole_tex)

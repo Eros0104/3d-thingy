@@ -2,12 +2,15 @@ $input v_color0, v_normal, v_texcoord0, v_worldPos
 
 #include <bgfx_shader.sh>
 
-SAMPLER2D(s_albedo, 0);
+SAMPLER2D(s_albedo,    0);
+SAMPLER2D(s_normal,    1);
+SAMPLER2D(s_roughness, 2);
 
 uniform vec4 u_lightPos[8];
 uniform vec4 u_lightColor[8];
 uniform vec4 u_lightParams;
 uniform vec4 u_ambient;
+uniform vec4 u_cameraPos;
 uniform vec4 u_wallSegs[128]; // each: (ax, az, bx, bz) in XZ plane
 uniform vec4 u_wallParams;    // x = number of active wall segments
 
@@ -25,13 +28,39 @@ bool wall_blocks(vec2 p, vec2 q, vec2 a, vec2 b) {
 
 void main()
 {
-	vec3 N = normalize(v_normal);
-	vec3 texRgb = texture2D(s_albedo, v_texcoord0).xyz;
+	vec2 uv = v_texcoord0;
+
+	// --- Tangent frame derived from geometry normal ---
+	// Works for flat walls (N horizontal) and floors/ceilings (N vertical).
+	// Matches the UV layout: floor u=world_x, v=world_z; wall u=along_wall, v=world_y.
+	vec3 geoN = normalize(v_normal);
+	vec3 T, B;
+	if (abs(geoN.y) > 0.5) {
+		// Floor / ceiling
+		T = vec3(1.0, 0.0, 0.0);
+		B = vec3(0.0, 0.0, 1.0);
+	} else {
+		// Wall: T along the wall direction, B up
+		T = vec3(geoN.z, 0.0, -geoN.x);
+		B = vec3(0.0, 1.0, 0.0);
+	}
+	mat3 TBN = mat3(T, B, geoN);
+
+	// Sample normal map and bring into world space
+	vec3 tsNormal = texture2D(s_normal, uv).xyz * 2.0 - 1.0;
+	vec3 N = normalize(mul(TBN, tsNormal));
+
+	// Roughness (0 = mirror, 1 = fully diffuse)
+	float roughness = texture2D(s_roughness, uv).r;
+	float shininess = (1.0 - roughness) * (1.0 - roughness) * 64.0 + 1.0;
+
+	vec3 texRgb = texture2D(s_albedo, uv).xyz;
 	vec3 albedo = texRgb * v_color0.xyz;
 	vec3 ambient = u_ambient.xyz * albedo;
 	vec3 diffuseAccum = vec3(0.0, 0.0, 0.0);
 
 	vec2 fragXZ = vec2(v_worldPos.x, v_worldPos.z);
+	vec3 V = normalize(u_cameraPos.xyz - v_worldPos);
 	int nWalls = int(u_wallParams.x);
 
 	for (int i = 0; i < 8; i++)
@@ -44,10 +73,9 @@ void main()
 		float distSq = dot(toLight, toLight);
 		float atten = 1.0 / (1.0 + 0.15 * distSq);
 
-		// Skip wall test for negligibly dim lights (saves ~128 ray tests per light).
 		if (atten < 0.005) continue;
 
-		// 2D wall occlusion: test if any wall blocks the path from fragment to light.
+		// 2D wall occlusion test in the XZ plane
 		vec2 lightXZ = vec2(u_lightPos[i].x, u_lightPos[i].z);
 		bool occluded = false;
 		for (int w = 0; w < 128; w++) {
@@ -62,8 +90,13 @@ void main()
 		vec3 L = normalize(toLight);
 		// Two-sided lighting: walls are zero-thickness so we light whichever face is nearer.
 		float ndl = abs(dot(N, L));
-		diffuseAccum += ndl * u_lightColor[i].xyz * albedo * atten;
+
+		// Blinn-Phong specular modulated by roughness
+		vec3 H = normalize(L + V);
+		float spec = pow(max(dot(N, H), 0.0), shininess) * (1.0 - roughness) * 0.4;
+
+		diffuseAccum += (ndl * albedo + spec) * u_lightColor[i].xyz * atten;
 	}
 
-	gl_FragColor = vec4(ambient + diffuseAccum, texture2D(s_albedo, v_texcoord0).a * v_color0.w);
+	gl_FragColor = vec4(ambient + diffuseAccum, texture2D(s_albedo, uv).a * v_color0.w);
 }

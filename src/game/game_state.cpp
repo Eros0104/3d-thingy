@@ -13,6 +13,13 @@
 #include "game/level/level_loader.hpp"
 #include "game/level/level_mesh.hpp"
 
+// Embedded textures
+#include <woodfloor_color.h>
+#include <woodfloor_normal.h>
+#include <woodfloor_roughness.h>
+#include <wall_albedo.h>
+#include <bullet_hole_tex.h>
+
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 
@@ -143,24 +150,44 @@ bool GameState::init(const char *level_path, int width, int height) {
                                        k_max_shader_lights);
   u_light_params_ =
       bgfx::createUniform("u_lightParams", bgfx::UniformType::Vec4);
-  u_ambient_ = bgfx::createUniform("u_ambient", bgfx::UniformType::Vec4);
-  u_wall_segs_   = bgfx::createUniform("u_wallSegs",   bgfx::UniformType::Vec4,
+  u_ambient_      = bgfx::createUniform("u_ambient",    bgfx::UniformType::Vec4);
+  u_cam_pos_      = bgfx::createUniform("u_cameraPos",  bgfx::UniformType::Vec4);
+  u_wall_segs_    = bgfx::createUniform("u_wallSegs",   bgfx::UniformType::Vec4,
                                         k_max_shader_walls);
-  u_wall_params_ = bgfx::createUniform("u_wallParams", bgfx::UniformType::Vec4);
-  s_albedo_ = bgfx::createUniform("s_albedo", bgfx::UniformType::Sampler);
-  u_bones_ = bgfx::createUniform("u_bones", bgfx::UniformType::Mat4, 120);
-  u_baseColor_ = bgfx::createUniform("u_baseColor", bgfx::UniformType::Vec4);
+  u_wall_params_  = bgfx::createUniform("u_wallParams", bgfx::UniformType::Vec4);
+  s_albedo_       = bgfx::createUniform("s_albedo",     bgfx::UniformType::Sampler);
+  s_normal_       = bgfx::createUniform("s_normal",     bgfx::UniformType::Sampler);
+  s_roughness_    = bgfx::createUniform("s_roughness",  bgfx::UniformType::Sampler);
+  u_bones_        = bgfx::createUniform("u_bones",      bgfx::UniformType::Mat4, 120);
+  u_baseColor_    = bgfx::createUniform("u_baseColor",  bgfx::UniformType::Vec4);
 
   // Textures
   static constexpr uint32_t k_white = 0xffffffffu;
   white_tex_ = bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::RGBA8,
                                      0, bgfx::copy(&k_white, sizeof(k_white)));
-  floor_tex_ = engine::load_texture_from_file(
-      ENGINE_TEXTURES_DIR "/checkered_pavement_tiles_diff_2k.jpg");
-  wall_tex_ = engine::load_texture_from_file(ENGINE_TEXTURES_DIR
-                                             "/plastered_wall_04_diff_2k.jpg");
-  bullet_hole_tex_ = engine::load_texture_from_file(
-      ENGINE_TEXTURES_DIR "/bullet_hole.png");
+
+  // 1×1 flat normal map: (128,128,255,255) = tangent-space (0,0,1)
+  static constexpr uint32_t k_flat_normal = 0xffff8080u; // ABGR: a=ff,b=ff,g=80,r=80
+  flat_normal_tex_ = bgfx::createTexture2D(
+      1, 1, false, 1, bgfx::TextureFormat::RGBA8,
+      0, bgfx::copy(&k_flat_normal, sizeof(k_flat_normal)));
+
+  // Floor material: woodfloor (embedded)
+  floor_mat_.albedo    = engine::load_texture_from_memory(
+      woodfloor_color,    sizeof(woodfloor_color),    "woodfloor_color");
+  floor_mat_.normal    = engine::load_texture_from_memory(
+      woodfloor_normal,   sizeof(woodfloor_normal),   "woodfloor_normal");
+  floor_mat_.roughness = engine::load_texture_from_memory(
+      woodfloor_roughness, sizeof(woodfloor_roughness), "woodfloor_roughness");
+
+  // Wall material: plaster albedo only, flat normal, full roughness (embedded)
+  wall_mat_.albedo    = engine::load_texture_from_memory(
+      wall_albedo, sizeof(wall_albedo), "wall_albedo");
+  wall_mat_.normal    = flat_normal_tex_;
+  wall_mat_.roughness = white_tex_;
+
+  bullet_hole_tex_ = engine::load_texture_from_memory(
+      bullet_hole_tex, sizeof(bullet_hole_tex), "bullet_hole");
 
   // Light bulb sphere
   {
@@ -274,18 +301,26 @@ void GameState::shutdown() {
     dvb(cube_vbh_[t]);
   dib(cube_ibh_);
 
-  dth(floor_tex_);
-  dth(wall_tex_);
   dth(white_tex_);
+  dth(flat_normal_tex_);
   dth(bullet_hole_tex_);
+  dth(floor_mat_.albedo);
+  dth(floor_mat_.normal);
+  dth(floor_mat_.roughness);
+  dth(wall_mat_.albedo);
+  // wall_mat_.normal == flat_normal_tex_ (already destroyed above)
+  // wall_mat_.roughness == white_tex_ (already destroyed above)
 
   duh(u_light_pos_);
   duh(u_light_color_);
   duh(u_light_params_);
   duh(u_ambient_);
+  duh(u_cam_pos_);
   duh(u_wall_segs_);
   duh(u_wall_params_);
   duh(s_albedo_);
+  duh(s_normal_);
+  duh(s_roughness_);
   duh(u_bones_);
   duh(u_baseColor_);
 
@@ -446,6 +481,12 @@ void GameState::render(int width, int height) {
   bgfx::setViewTransform(1, view, proj);
 
   sys_set_lights();
+
+  // Camera world position for specular calculation
+  const FpsCamera& cam = player_.camera();
+  const float cam_pos[4] = {cam.eyeX, cam.eyeY, cam.eyeZ, 0.f};
+  bgfx::setUniform(u_cam_pos_, cam_pos);
+
   sys_render_level();
   sys_render_targets();
   sys_render_bullet_holes();
@@ -511,30 +552,33 @@ void GameState::sys_set_lights() {
 void GameState::sys_render_level() {
   float mtx[16];
 
-  auto submit_geo = [&](bgfx::VertexBufferHandle vbh, bgfx::TextureHandle tex) {
+  auto submit_geo = [&](bgfx::VertexBufferHandle vbh, const engine::Material& mat) {
     if (!bgfx::isValid(vbh))
       return;
     bgfx::setState(render_state_);
     bx::mtxIdentity(mtx);
     bgfx::setTransform(mtx);
-    bgfx::setTexture(0, s_albedo_, tex);
+    bgfx::setTexture(0, s_albedo_,
+        bgfx::isValid(mat.albedo)    ? mat.albedo    : white_tex_);
+    bgfx::setTexture(1, s_normal_,
+        bgfx::isValid(mat.normal)    ? mat.normal    : flat_normal_tex_);
+    bgfx::setTexture(2, s_roughness_,
+        bgfx::isValid(mat.roughness) ? mat.roughness : white_tex_);
     bgfx::setVertexBuffer(0, vbh);
     bgfx::submit(0, program_);
   };
 
-  const bgfx::TextureHandle floor_bind =
-      bgfx::isValid(floor_tex_) ? floor_tex_ : white_tex_;
-  const bgfx::TextureHandle wall_bind =
-      bgfx::isValid(wall_tex_) ? wall_tex_ : white_tex_;
-  submit_geo(floor_vbh_, floor_bind);
-  submit_geo(wall_vbh_, wall_bind);
-  submit_geo(stair_vbh_, wall_bind);
+  submit_geo(floor_vbh_, floor_mat_);
+  submit_geo(wall_vbh_,  wall_mat_);
+  submit_geo(stair_vbh_, wall_mat_);
 
   auto draw_bulb = [&](float lx, float ly, float lz) {
     bgfx::setState(render_state_);
     bx::mtxTranslate(mtx, lx, ly, lz);
     bgfx::setTransform(mtx);
-    bgfx::setTexture(0, s_albedo_, white_tex_);
+    bgfx::setTexture(0, s_albedo_,    white_tex_);
+    bgfx::setTexture(1, s_normal_,    flat_normal_tex_);
+    bgfx::setTexture(2, s_roughness_, white_tex_);
     bgfx::setVertexBuffer(0, bulb_vbh_);
     bgfx::setIndexBuffer(bulb_ibh_);
     bgfx::submit(0, program_);
@@ -557,7 +601,9 @@ void GameState::sys_render_targets() {
     bgfx::setState(render_state_);
     bx::mtxTranslate(mtx, tgt.x, tgt.y, tgt.z);
     bgfx::setTransform(mtx);
-    bgfx::setTexture(0, s_albedo_, white_tex_);
+    bgfx::setTexture(0, s_albedo_,    white_tex_);
+    bgfx::setTexture(1, s_normal_,    flat_normal_tex_);
+    bgfx::setTexture(2, s_roughness_, white_tex_);
     bgfx::setVertexBuffer(0, cube_vbh_[tint]);
     bgfx::setIndexBuffer(cube_ibh_);
     bgfx::submit(0, program_);
@@ -643,7 +689,9 @@ void GameState::sys_render_bullet_holes() {
   bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                  BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_MSAA | blend);
   bgfx::setTransform(mtx);
-  bgfx::setTexture(0, s_albedo_, tex);
+  bgfx::setTexture(0, s_albedo_,    tex);
+  bgfx::setTexture(1, s_normal_,    flat_normal_tex_);
+  bgfx::setTexture(2, s_roughness_, white_tex_);
   bgfx::setVertexBuffer(0, &tvb);
   bgfx::setIndexBuffer(&tib);
   bgfx::submit(0, program_);

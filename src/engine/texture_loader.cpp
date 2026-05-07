@@ -64,4 +64,44 @@ bgfx::TextureHandle load_texture_from_file(const char* path, uint64_t flags)
 	return handle;
 }
 
+bgfx::TextureHandle load_texture_from_memory(const void* data, size_t size,
+                                              const char* debug_name,
+                                              uint64_t flags)
+{
+	bx::DefaultAllocator allocator;
+	bimg::ImageContainer* image = bimg::imageParse(
+		&allocator,
+		data,
+		static_cast<uint32_t>(size)
+	);
+	if (!image) {
+		std::fprintf(stderr, "texture: decode failed for embedded texture \"%s\"\n",
+		             debug_name ? debug_name : "<unnamed>");
+		return BGFX_INVALID_HANDLE;
+	}
+
+	if (image->m_cubeMap || image->m_depth > 1) {
+		bimg::imageFree(image);
+		return BGFX_INVALID_HANDLE;
+	}
+
+	const bgfx::Memory* mem = bgfx::copy(image->m_data, image->m_size);
+	bimg::imageFree(image);
+
+	bgfx::TextureHandle handle = bgfx::createTexture2D(
+		static_cast<uint16_t>(image->m_width),
+		static_cast<uint16_t>(image->m_height),
+		image->m_numMips > 1,
+		image->m_numLayers,
+		static_cast<bgfx::TextureFormat::Enum>(image->m_format),
+		flags,
+		mem
+	);
+
+	if (bgfx::isValid(handle) && debug_name)
+		bgfx::setName(handle, debug_name);
+
+	return handle;
+}
+
 } // namespace engine

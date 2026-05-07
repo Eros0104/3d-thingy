@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/material.hpp"
 #include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/level/level_data.hpp"
@@ -85,16 +86,21 @@ private:
     bgfx::UniformHandle u_light_color_  = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_light_params_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_ambient_      = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle u_cam_pos_      = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_wall_segs_    = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_wall_params_  = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle s_albedo_       = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle s_normal_       = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle s_roughness_    = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_bones_        = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_baseColor_    = BGFX_INVALID_HANDLE;
 
     bgfx::TextureHandle white_tex_       = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle floor_tex_       = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle wall_tex_        = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle flat_normal_tex_ = BGFX_INVALID_HANDLE; // 1x1 (128,128,255)
     bgfx::TextureHandle bullet_hole_tex_ = BGFX_INVALID_HANDLE;
+
+    engine::Material floor_mat_{};
+    engine::Material wall_mat_{};
 
     bool     hud_ok_            = false;
     bool     show_collision_    = false;
