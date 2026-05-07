@@ -8,6 +8,20 @@ uniform vec4 u_lightPos[8];
 uniform vec4 u_lightColor[8];
 uniform vec4 u_lightParams;
 uniform vec4 u_ambient;
+uniform vec4 u_wallSegs[128]; // each: (ax, az, bx, bz) in XZ plane
+uniform vec4 u_wallParams;    // x = number of active wall segments
+
+// Returns true if the segment P->Q is blocked by wall segment A->B (XZ plane).
+bool wall_blocks(vec2 p, vec2 q, vec2 a, vec2 b) {
+	vec2 r = q - p;
+	vec2 s = b - a;
+	float denom = r.x * s.y - r.y * s.x;
+	if (abs(denom) < 0.0001) return false;
+	vec2 ap = a - p;
+	float t = (ap.x * s.y - ap.y * s.x) / denom;
+	float u = (ap.x * r.y - ap.y * r.x) / denom;
+	return t > 0.005 && t < 1.0 && u >= 0.0 && u <= 1.0;
+}
 
 void main()
 {
@@ -17,6 +31,9 @@ void main()
 	vec3 ambient = u_ambient.xyz * albedo;
 	vec3 diffuseAccum = vec3(0.0, 0.0, 0.0);
 
+	vec2 fragXZ = vec2(v_worldPos.x, v_worldPos.z);
+	int nWalls = int(u_wallParams.x);
+
 	for (int i = 0; i < 8; i++)
 	{
 		if (float(i) >= u_lightParams.x) {
@@ -25,10 +42,26 @@ void main()
 
 		vec3 toLight = u_lightPos[i].xyz - v_worldPos;
 		float distSq = dot(toLight, toLight);
+		float atten = 1.0 / (1.0 + 0.15 * distSq);
+
+		// Skip wall test for negligibly dim lights (saves ~128 ray tests per light).
+		if (atten < 0.005) continue;
+
+		// 2D wall occlusion: test if any wall blocks the path from fragment to light.
+		vec2 lightXZ = vec2(u_lightPos[i].x, u_lightPos[i].z);
+		bool occluded = false;
+		for (int w = 0; w < 128; w++) {
+			if (w >= nWalls) break;
+			if (wall_blocks(fragXZ, lightXZ, u_wallSegs[w].xy, u_wallSegs[w].zw)) {
+				occluded = true;
+				break;
+			}
+		}
+		if (occluded) continue;
+
 		vec3 L = normalize(toLight);
 		// Two-sided lighting: walls are zero-thickness so we light whichever face is nearer.
 		float ndl = abs(dot(N, L));
-		float atten = 1.0 / (1.0 + 0.15 * distSq);
 		diffuseAccum += ndl * u_lightColor[i].xyz * albedo * atten;
 	}
 

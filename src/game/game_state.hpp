@@ -65,6 +65,7 @@ private:
 
     // --- bgfx resources ---
     static constexpr int k_max_shader_lights = 8;
+    static constexpr int k_max_shader_walls  = 128;
 
     bgfx::VertexLayout       layout_{};
     bgfx::VertexBufferHandle floor_vbh_  = BGFX_INVALID_HANDLE;
@@ -84,6 +85,8 @@ private:
     bgfx::UniformHandle u_light_color_  = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_light_params_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_ambient_      = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle u_wall_segs_    = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle u_wall_params_  = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle s_albedo_       = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_bones_        = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle u_baseColor_    = BGFX_INVALID_HANDLE;

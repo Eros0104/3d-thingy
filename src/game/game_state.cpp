@@ -144,6 +144,9 @@ bool GameState::init(const char *level_path, int width, int height) {
   u_light_params_ =
       bgfx::createUniform("u_lightParams", bgfx::UniformType::Vec4);
   u_ambient_ = bgfx::createUniform("u_ambient", bgfx::UniformType::Vec4);
+  u_wall_segs_   = bgfx::createUniform("u_wallSegs",   bgfx::UniformType::Vec4,
+                                        k_max_shader_walls);
+  u_wall_params_ = bgfx::createUniform("u_wallParams", bgfx::UniformType::Vec4);
   s_albedo_ = bgfx::createUniform("s_albedo", bgfx::UniformType::Sampler);
   u_bones_ = bgfx::createUniform("u_bones", bgfx::UniformType::Mat4, 120);
   u_baseColor_ = bgfx::createUniform("u_baseColor", bgfx::UniformType::Vec4);
@@ -280,6 +283,8 @@ void GameState::shutdown() {
   duh(u_light_color_);
   duh(u_light_params_);
   duh(u_ambient_);
+  duh(u_wall_segs_);
+  duh(u_wall_params_);
   duh(s_albedo_);
   duh(u_bones_);
   duh(u_baseColor_);
@@ -487,6 +492,20 @@ void GameState::sys_set_lights() {
   bgfx::setUniform(u_light_color_, col_pack.data(), k_max_shader_lights);
   bgfx::setUniform(u_light_params_, params);
   bgfx::setUniform(u_ambient_, amb);
+
+  // Pack wall segments for 2D occlusion (ax, az, bx, bz per wall).
+  std::array<float, k_max_shader_walls * 4> wall_pack{};
+  size_t nw = std::min(level_.walls.size(), size_t(k_max_shader_walls));
+  for (size_t i = 0; i < nw; ++i) {
+    const engine::Wall &W = level_.walls[i];
+    wall_pack[i * 4 + 0] = W.a.x;
+    wall_pack[i * 4 + 1] = W.a.z;
+    wall_pack[i * 4 + 2] = W.b.x;
+    wall_pack[i * 4 + 3] = W.b.z;
+  }
+  const float wparams[4] = {float(nw), 0.f, 0.f, 0.f};
+  bgfx::setUniform(u_wall_segs_,   wall_pack.data(), k_max_shader_walls);
+  bgfx::setUniform(u_wall_params_, wparams);
 }
 
 void GameState::sys_render_level() {
