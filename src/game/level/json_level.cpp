@@ -218,6 +218,8 @@ bool parse_light(const json& jl, Light& out, std::string& err)
 	}
 	out.intensity = 1.0f;
 	get_float(jl, "intensity", out.intensity);
+	out.radius = 10.0f;
+	get_float(jl, "radius", out.radius);
 	return true;
 }
 

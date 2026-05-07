@@ -66,6 +66,7 @@ struct Light {
 	Vec3 pos;
 	std::array<float, 3> color = {2.4f, 2.1f, 1.7f};
 	float intensity = 1.0f;
+	float radius = 10.0f; // world-units; light is zero beyond this distance
 };
 
 struct Spawn {

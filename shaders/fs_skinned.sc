@@ -20,7 +20,7 @@ bool wall_blocks(vec2 p, vec2 q, vec2 a, vec2 b) {
 	vec2 ap = a - p;
 	float t = (ap.x * s.y - ap.y * s.x) / denom;
 	float u = (ap.x * r.y - ap.y * r.x) / denom;
-	return t > 0.005 && t < 1.0 && u >= 0.0 && u <= 1.0;
+	return t > 1e-5 && t < 1.0 && u >= 0.0 && u <= 1.0;
 }
 
 void main()
@@ -41,10 +41,11 @@ void main()
 		}
 
 		vec3 toLight = u_lightPos[i].xyz - v_worldPos;
-		float distSq = dot(toLight, toLight);
-		float atten = 1.0 / (1.0 + 0.15 * distSq);
-
-		if (atten < 0.005) continue;
+		float dist = length(toLight);
+		float r = max(u_lightPos[i].w, 0.001);
+		if (dist >= r) continue;
+		float falloff = 1.0 - dist / r;
+		float atten = falloff * falloff;
 
 		vec2 lightXZ = vec2(u_lightPos[i].x, u_lightPos[i].z);
 		bool occluded = false;

@@ -224,7 +224,7 @@ bool GameState::init(const char *level_path, int width, int height) {
 
   render_state_ = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                   BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS |
-                  BGFX_STATE_MSAA;
+                  BGFX_STATE_CULL_CCW | BGFX_STATE_MSAA;
 
   // Player
   {
@@ -368,6 +368,8 @@ void GameState::handle_event(const SDL_Event &event) {
   player_.handle_event(event);
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c && !event.key.repeat)
     show_collision_ = !show_collision_;
+  if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_l && !event.key.repeat)
+    show_lights_ = !show_lights_;
 }
 
 // ============================================================
@@ -494,6 +496,8 @@ void GameState::render(int width, int height) {
   particles_.render(0, debug_program_);
   if (show_collision_)
     sys_render_collision_debug();
+  if (show_lights_)
+    sys_render_debug_lights();
   sys_render_hud();
   sys_render_debug_text();
 }
@@ -507,7 +511,7 @@ void GameState::sys_set_lights() {
     pos_pack[0] = 0.f;
     pos_pack[1] = 4.f;
     pos_pack[2] = 0.f;
-    pos_pack[3] = 0.f;
+    pos_pack[3] = 10.f;
     col_pack[0] = 2.4f;
     col_pack[1] = 2.1f;
     col_pack[2] = 1.7f;
@@ -520,6 +524,7 @@ void GameState::sys_set_lights() {
       pos_pack[i * 4 + 0] = L.pos.x;
       pos_pack[i * 4 + 1] = L.pos.y;
       pos_pack[i * 4 + 2] = L.pos.z;
+      pos_pack[i * 4 + 3] = L.radius;
       col_pack[i * 4 + 0] = L.color[0] * L.intensity;
       col_pack[i * 4 + 1] = L.color[1] * L.intensity;
       col_pack[i * 4 + 2] = L.color[2] * L.intensity;
@@ -534,16 +539,50 @@ void GameState::sys_set_lights() {
   bgfx::setUniform(u_light_params_, params);
   bgfx::setUniform(u_ambient_, amb);
 
-  // Pack wall segments for 2D occlusion (ax, az, bx, bz per wall).
+  // Pack solid wall sub-segments for 2D occlusion, splitting out brush openings
+  // so doors and windows allow light to pass through.
   std::array<float, k_max_shader_walls * 4> wall_pack{};
-  size_t nw = std::min(level_.walls.size(), size_t(k_max_shader_walls));
-  for (size_t i = 0; i < nw; ++i) {
-    const engine::Wall &W = level_.walls[i];
-    wall_pack[i * 4 + 0] = W.a.x;
-    wall_pack[i * 4 + 1] = W.a.z;
-    wall_pack[i * 4 + 2] = W.b.x;
-    wall_pack[i * 4 + 3] = W.b.z;
+  size_t nw = 0;
+
+  for (size_t wi = 0; wi < level_.walls.size(); ++wi) {
+    if (nw >= size_t(k_max_shader_walls)) break;
+    const engine::Wall &W = level_.walls[wi];
+    const float dx = W.b.x - W.a.x;
+    const float dz = W.b.z - W.a.z;
+    const float len = std::sqrt(dx * dx + dz * dz);
+    if (len <= 1e-6f) continue;
+
+    // Collect horizontal brush openings on this wall as parametric [t0, t1] spans.
+    struct Span { float t0, t1; };
+    std::vector<Span> openings;
+    for (const auto &B : level_.brushes) {
+      if (B.wall != int(wi)) continue;
+      const float t0 = std::max(0.f, B.offset / len);
+      const float t1 = std::min(1.f, (B.offset + B.width) / len);
+      if (t1 > t0 + 1e-6f) openings.push_back({t0, t1});
+    }
+    std::sort(openings.begin(), openings.end(),
+              [](const Span &a, const Span &b) { return a.t0 < b.t0; });
+
+    // Emit the solid segments that remain between (and around) openings.
+    auto emit = [&](float t0, float t1) {
+      if (nw >= size_t(k_max_shader_walls)) return;
+      if (t1 <= t0 + 1e-6f) return;
+      wall_pack[nw * 4 + 0] = W.a.x + dx * t0;
+      wall_pack[nw * 4 + 1] = W.a.z + dz * t0;
+      wall_pack[nw * 4 + 2] = W.a.x + dx * t1;
+      wall_pack[nw * 4 + 3] = W.a.z + dz * t1;
+      ++nw;
+    };
+
+    float cursor = 0.f;
+    for (const auto &sp : openings) {
+      emit(cursor, sp.t0);
+      cursor = sp.t1;
+    }
+    emit(cursor, 1.f);
   }
+
   const float wparams[4] = {float(nw), 0.f, 0.f, 0.f};
   bgfx::setUniform(u_wall_segs_,   wall_pack.data(), k_max_shader_walls);
   bgfx::setUniform(u_wall_params_, wparams);
@@ -802,6 +841,65 @@ void GameState::sys_render_collision_debug() {
   }
 }
 
+void GameState::sys_render_debug_lights() {
+  if (!bgfx::isValid(debug_program_)) return;
+
+  constexpr int N = 32;
+  // 3 circles × N line segments × 2 verts each
+  constexpr int n_verts = 3 * N * 2;
+
+  bgfx::VertexLayout layout;
+  layout.begin()
+      .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+      .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+      .end();
+
+  constexpr float k_2pi = 6.28318530717958647692f;
+
+  for (const engine::Light& L : level_.lights) {
+    if (bgfx::getAvailTransientVertexBuffer(n_verts, layout) < n_verts) break;
+
+    bgfx::TransientVertexBuffer tvb;
+    bgfx::allocTransientVertexBuffer(&tvb, n_verts, layout);
+
+    struct V { float x, y, z; uint32_t abgr; };
+    V* v = reinterpret_cast<V*>(tvb.data);
+    int idx = 0;
+    const float cx = L.pos.x, cy = L.pos.y, cz = L.pos.z, r = L.radius;
+    const uint32_t col = 0xff00ffffu; // yellow
+
+    // XZ circle (horizontal)
+    for (int i = 0; i < N; ++i) {
+      const float a0 = float(i)   / N * k_2pi;
+      const float a1 = float(i+1) / N * k_2pi;
+      v[idx++] = { cx + r*std::cos(a0), cy, cz + r*std::sin(a0), col };
+      v[idx++] = { cx + r*std::cos(a1), cy, cz + r*std::sin(a1), col };
+    }
+    // XY circle (vertical, facing Z)
+    for (int i = 0; i < N; ++i) {
+      const float a0 = float(i)   / N * k_2pi;
+      const float a1 = float(i+1) / N * k_2pi;
+      v[idx++] = { cx + r*std::cos(a0), cy + r*std::sin(a0), cz, col };
+      v[idx++] = { cx + r*std::cos(a1), cy + r*std::sin(a1), cz, col };
+    }
+    // ZY circle (vertical, facing X)
+    for (int i = 0; i < N; ++i) {
+      const float a0 = float(i)   / N * k_2pi;
+      const float a1 = float(i+1) / N * k_2pi;
+      v[idx++] = { cx, cy + r*std::sin(a0), cz + r*std::cos(a0), col };
+      v[idx++] = { cx, cy + r*std::sin(a1), cz + r*std::cos(a1), col };
+    }
+
+    float mtx[16];
+    bx::mtxIdentity(mtx);
+    bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                   BGFX_STATE_PT_LINES  | BGFX_STATE_DEPTH_TEST_LESS);
+    bgfx::setTransform(mtx);
+    bgfx::setVertexBuffer(0, &tvb);
+    bgfx::submit(0, debug_program_);
+  }
+}
+
 void GameState::sys_render_hud() {
   if (!hud_ok_)
     return;
@@ -833,10 +931,11 @@ void GameState::sys_render_hud() {
 void GameState::sys_render_debug_text() {
   bgfx::dbgTextClear();
   bgfx::dbgTextPrintf(
-      0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   LMB:Shoot R:Reload",
+      0, 1, 0x0f, "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   L: lights=%s   LMB:Shoot R:Reload",
       player_.mouse_look() ? "free cursor" : "capture",
       player_.show_axes_gizmo() ? "on" : "off",
-      show_collision_ ? "on" : "off");
+      show_collision_ ? "on" : "off",
+      show_lights_ ? "on" : "off");
   bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
                       level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
                       level_.sectors.size(), level_.walls.size(),

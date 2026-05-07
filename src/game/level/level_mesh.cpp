@@ -384,10 +384,9 @@ void emit_stair(std::vector<LitVertex>& out, const Stair& s)
 		const Vec2 b0{mid0.x + px * half_w, mid0.z + pz * half_w};
 		const Vec2 a1{mid1.x - px * half_w, mid1.z - pz * half_w};
 		const Vec2 b1{mid1.x + px * half_w, mid1.z + pz * half_w};
-		const float y_bottom = s.from_y;
+		const float y_bottom = s.from_y + (s.to_y - s.from_y) * t0;
 		const float y_top = s.from_y + (s.to_y - s.from_y) * t1;
-		const bool is_last = (i == steps - 1);
-		emit_stair_step_box(out, a0, b0, a1, b1, y_bottom, y_top, is_last);
+		emit_stair_step_box(out, a0, b0, a1, b1, y_bottom, y_top, true);
 	}
 }
 
@@ -472,26 +471,32 @@ void build_level_meshes(const Level& level, LevelMeshOutput& out)
 				const BrushEdge& e1 = bedges[i];
 				const BrushEdge& e2 = bedges[j];
 				if (e1.wall_idx == e2.wall_idx) continue;
-				if (dsq(e1.left,  e2.left)  > k_pair_tol_sq) continue;
-				if (dsq(e1.right, e2.right) > k_pair_tol_sq) continue;
+				const bool fwd = dsq(e1.left,  e2.left)  <= k_pair_tol_sq &&
+				                 dsq(e1.right, e2.right) <= k_pair_tol_sq;
+				const bool rev = dsq(e1.left,  e2.right) <= k_pair_tol_sq &&
+				                 dsq(e1.right, e2.left)  <= k_pair_tol_sq;
+				if (!fwd && !rev) continue;
 				const float y0 = std::max(e1.y0, e2.y0);
 				const float y1 = std::min(e1.y1, e2.y1);
 				if (y1 <= y0 + 1e-6f) continue;
 
-				const float depth   = std::sqrt(dsq(e1.left, e2.left));
+				// For fwd pairs both lefts align; for rev pairs e1.left aligns with e2.right.
+				const Vec2& near_left  = fwd ? e2.left  : e2.right;
+				const Vec2& near_right = fwd ? e2.right : e2.left;
+				const float depth   = std::sqrt(dsq(e1.left, near_left));
 				const float u_depth = depth * k_wall_uv_scale;
 
 				// Left jamb: vertical fill at the opening's left edge, facing into the passage
-				emit_vertical_quad(out.wall_vertices, e1.left,  e2.left,  y0, y1, 0.f, u_depth,  e1.ux,  e1.uz, k_frame_abgr);
+				emit_vertical_quad(out.wall_vertices, e1.left,  near_left,  y0, y1, 0.f, u_depth,  e1.ux,  e1.uz, k_frame_abgr);
 				// Right jamb: vertical fill at the opening's right edge
-				emit_vertical_quad(out.wall_vertices, e2.right, e1.right, y0, y1, 0.f, u_depth, -e1.ux, -e1.uz, k_frame_abgr);
+				emit_vertical_quad(out.wall_vertices, near_right, e1.right, y0, y1, 0.f, u_depth, -e1.ux, -e1.uz, k_frame_abgr);
 				// Header: horizontal cap closing the top of the opening gap
-				emit_horizontal_quad(out.wall_vertices, e1.left, e1.right, e2.right, e2.left, y1, -1.f, k_frame_abgr);
+				emit_horizontal_quad(out.wall_vertices, e1.left, e1.right, near_right, near_left, y1, -1.f, k_frame_abgr);
 
 				// Sill: only for windows (opening not flush with wall base)
 				const bool is_window = e1.y0 > e1.base_y + 1e-6f || e2.y0 > e2.base_y + 1e-6f;
 				if (is_window) {
-					emit_horizontal_quad(out.wall_vertices, e2.left, e2.right, e1.right, e1.left, y0, 1.f, k_frame_abgr);
+					emit_horizontal_quad(out.wall_vertices, near_left, near_right, e1.right, e1.left, y0, 1.f, k_frame_abgr);
 				}
 
 				used[i] = used[j] = true;

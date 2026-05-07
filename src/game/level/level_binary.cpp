@@ -96,7 +96,7 @@ void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes)
 {
 	out_bytes.clear();
 	write_bytes(out_bytes, k_evil_magic, 4);
-	write_u32(out_bytes, k_evil_version);
+	write_u32(out_bytes, static_cast<uint32_t>(k_evil_version));
 
 	write_string(out_bytes, level.name);
 	write_f32(out_bytes, level.wall_height);
@@ -162,6 +162,7 @@ void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes)
 		write_f32(out_bytes, l.color[1]);
 		write_f32(out_bytes, l.color[2]);
 		write_f32(out_bytes, l.intensity);
+		write_f32(out_bytes, l.radius);
 	}
 }
 
@@ -176,7 +177,7 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 		return false;
 	}
 	uint32_t version = 0;
-	if (!r.read_u32(version) || version != k_evil_version) {
+	if (!r.read_u32(version) || (version != 4 && version != k_evil_version)) {
 		err = "unsupported .evil version";
 		return false;
 	}
@@ -259,6 +260,9 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 			|| !r.read_f32(l.color[0]) || !r.read_f32(l.color[1]) || !r.read_f32(l.color[2])
 			|| !r.read_f32(l.intensity)) {
 			err = "truncated light"; return false;
+		}
+		if (version >= 5) {
+			if (!r.read_f32(l.radius)) { err = "truncated light radius"; return false; }
 		}
 	}
 

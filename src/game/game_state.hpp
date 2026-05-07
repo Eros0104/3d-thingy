@@ -46,6 +46,7 @@ private:
     void sys_render_characters();
     void sys_render_bullet_holes();
     void sys_render_collision_debug();
+    void sys_render_debug_lights();
     void sys_render_hud();
     void sys_render_debug_text();
 
@@ -104,6 +105,7 @@ private:
 
     bool     hud_ok_            = false;
     bool     show_collision_    = false;
+    bool     show_lights_       = false;
     uint64_t render_state_      = 0;
     int      width_             = 1280;
     int      height_            = 720;
