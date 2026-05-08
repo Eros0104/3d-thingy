@@ -12,6 +12,9 @@ struct CharVerticalState { float velocity_y = 0.f; };
 using CharHandle = uint32_t;
 inline constexpr CharHandle k_invalid_char = UINT32_MAX;
 
+using BodyHandle = uint32_t;
+inline constexpr BodyHandle k_invalid_body = UINT32_MAX;
+
 struct JoltRayHit {
     float t  = 0.f;
     float nx = 0.f, ny = 0.f, nz = 0.f;
@@ -48,6 +51,14 @@ public:
                         float dx, float dy, float dz,
                         float max_dist,
                         JoltRayHit& hit) const;
+
+    // Add a kinematic box body (static layer so characters collide with it).
+    // cx/cy/cz: center of the box in local body space (use for off-pivot shapes).
+    BodyHandle add_kinematic_box(float x, float y, float z, float angle_y,
+                                 float half_w, float half_h, float half_d,
+                                 float cx, float cy, float cz);
+    void set_kinematic_transform(BodyHandle h, float x, float y, float z, float angle_y);
+    void remove_body(BodyHandle h);
 
     // Step the physics world (call once per frame before character updates).
     void update(float dt);

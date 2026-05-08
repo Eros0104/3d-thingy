@@ -3,6 +3,7 @@
 #include "engine/material.hpp"
 #include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
+#include "game/door.hpp"
 #include "game/level/level_data.hpp"
 #include "game/particles.hpp"
 #include "game/player.hpp"
@@ -39,6 +40,7 @@ private:
 
   void sys_shooting();
   void sys_zombie_ai(float dt);
+  void sys_interact_door();
   void sys_set_lights();
   void sys_render_level();
   void sys_render_targets();
@@ -61,6 +63,10 @@ private:
   game::Player player_;
   std::vector<game::Zombie> zombies_;
   game::BloodParticleSystem particles_;
+  Door door_;
+  engine::ModelDrawParams door_params_{};
+  bool near_door_         = false;
+  bool interact_pressed_  = false;
   std::vector<BulletHole> bullet_holes_;
 
   // --- level ---

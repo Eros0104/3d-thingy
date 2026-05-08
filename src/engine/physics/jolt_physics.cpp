@@ -9,6 +9,7 @@
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
@@ -119,7 +120,8 @@ struct JoltPhysics::Impl {
 
     JPH::BodyID level_body_id{JPH::BodyID::cInvalidBodyID};
 
-    std::vector<CharEntry> chars;
+    std::vector<CharEntry>  chars;
+    std::vector<JPH::BodyID> kinematic_bodies;
 };
 
 // ---------------------------------------------------------------------------
@@ -158,6 +160,15 @@ void JoltPhysics::shutdown() {
     impl_->chars.clear();
 
     JPH::BodyInterface& bi = impl_->physics_system.GetBodyInterface();
+    for (JPH::BodyID& id : impl_->kinematic_bodies) {
+        if (!id.IsInvalid()) {
+            bi.RemoveBody(id);
+            bi.DestroyBody(id);
+            id = JPH::BodyID{JPH::BodyID::cInvalidBodyID};
+        }
+    }
+    impl_->kinematic_bodies.clear();
+
     if (!impl_->level_body_id.IsInvalid()) {
         bi.RemoveBody(impl_->level_body_id);
         bi.DestroyBody(impl_->level_body_id);
@@ -314,6 +325,58 @@ void JoltPhysics::get_character_pos(CharHandle h, float& x, float& y, float& z) 
 void JoltPhysics::set_character_pos(CharHandle h, float x, float y, float z) {
     if (h >= impl_->chars.size() || !impl_->chars[h].active) return;
     impl_->chars[h].character->SetPosition(JPH::RVec3{x, y, z});
+}
+
+BodyHandle JoltPhysics::add_kinematic_box(
+    float x, float y, float z, float angle_y,
+    float half_w, float half_h, float half_d,
+    float cx, float cy, float cz)
+{
+    JPH::Ref<JPH::BoxShapeSettings> box = new JPH::BoxShapeSettings{
+        JPH::Vec3{half_w, half_h, half_d}
+    };
+    JPH::Ref<JPH::RotatedTranslatedShapeSettings> rts = new JPH::RotatedTranslatedShapeSettings{
+        JPH::Vec3{cx, cy, cz}, JPH::Quat::sIdentity(), box
+    };
+    auto result = rts->Create();
+    if (result.HasError()) return k_invalid_body;
+
+    const JPH::Quat rot = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), angle_y);
+    JPH::BodyCreationSettings bcs{
+        result.Get(), JPH::RVec3{x, y, z}, rot,
+        JPH::EMotionType::Kinematic, Layers::STATIC
+    };
+    JPH::BodyInterface& bi = impl_->physics_system.GetBodyInterface();
+    JPH::BodyID id = bi.CreateAndAddBody(bcs, JPH::EActivation::Activate);
+    if (id.IsInvalid()) return k_invalid_body;
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(impl_->kinematic_bodies.size()); ++i) {
+        if (impl_->kinematic_bodies[i].IsInvalid()) {
+            impl_->kinematic_bodies[i] = id;
+            return i;
+        }
+    }
+    impl_->kinematic_bodies.push_back(id);
+    return static_cast<BodyHandle>(impl_->kinematic_bodies.size() - 1);
+}
+
+void JoltPhysics::set_kinematic_transform(BodyHandle h, float x, float y, float z, float angle_y) {
+    if (h >= static_cast<uint32_t>(impl_->kinematic_bodies.size())) return;
+    const JPH::BodyID id = impl_->kinematic_bodies[h];
+    if (id.IsInvalid()) return;
+    JPH::BodyInterface& bi = impl_->physics_system.GetBodyInterface();
+    const JPH::Quat rot = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), angle_y);
+    bi.SetPositionAndRotation(id, JPH::RVec3{x, y, z}, rot, JPH::EActivation::DontActivate);
+}
+
+void JoltPhysics::remove_body(BodyHandle h) {
+    if (h >= static_cast<uint32_t>(impl_->kinematic_bodies.size())) return;
+    JPH::BodyID& id = impl_->kinematic_bodies[h];
+    if (id.IsInvalid()) return;
+    JPH::BodyInterface& bi = impl_->physics_system.GetBodyInterface();
+    bi.RemoveBody(id);
+    bi.DestroyBody(id);
+    id = JPH::BodyID{JPH::BodyID::cInvalidBodyID};
 }
 
 bool JoltPhysics::cast_ray_level(float ox, float oy, float oz,

@@ -46,10 +46,11 @@
 #define ENGINE_FONTS_DIR "fonts"
 #endif
 
-// Build a static line-list VBH from a triangle soup (every 3 LitVertices = 1 triangle).
-// Emits 3 edges per triangle as vertex pairs for BGFX_STATE_PT_LINES.
-static bgfx::VertexBufferHandle build_wireframe_vbh(const std::vector<LitVertex> &tris,
-                                                    uint32_t color) {
+// Build a static line-list VBH from a triangle soup (every 3 LitVertices = 1
+// triangle). Emits 3 edges per triangle as vertex pairs for
+// BGFX_STATE_PT_LINES.
+static bgfx::VertexBufferHandle
+build_wireframe_vbh(const std::vector<LitVertex> &tris, uint32_t color) {
   if (tris.size() < 3)
     return BGFX_INVALID_HANDLE;
 
@@ -59,7 +60,10 @@ static bgfx::VertexBufferHandle build_wireframe_vbh(const std::vector<LitVertex>
       .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
       .end();
 
-  struct V { float x, y, z; uint32_t abgr; };
+  struct V {
+    float x, y, z;
+    uint32_t abgr;
+  };
   std::vector<V> verts;
   verts.reserve(tris.size() * 2); // 3 edges × 2 verts per triangle
 
@@ -79,8 +83,9 @@ static bgfx::VertexBufferHandle build_wireframe_vbh(const std::vector<LitVertex>
 }
 
 // Build a line-list VBH showing AABB edges for all clipping cubes.
-static bgfx::VertexBufferHandle build_clip_cube_vbh(
-    const std::vector<engine::ClippingCube> &cubes, uint32_t color) {
+static bgfx::VertexBufferHandle
+build_clip_cube_vbh(const std::vector<engine::ClippingCube> &cubes,
+                    uint32_t color) {
   if (cubes.empty())
     return BGFX_INVALID_HANDLE;
 
@@ -90,29 +95,47 @@ static bgfx::VertexBufferHandle build_clip_cube_vbh(
       .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
       .end();
 
-  struct V { float x, y, z; uint32_t abgr; };
+  struct V {
+    float x, y, z;
+    uint32_t abgr;
+  };
   std::vector<V> verts;
   verts.reserve(cubes.size() * 24); // 12 edges × 2 verts
 
   for (const auto &cc : cubes) {
-    const float x0 = cc.pos.x - cc.half_extents.x, x1 = cc.pos.x + cc.half_extents.x;
-    const float y0 = cc.pos.y - cc.half_extents.y, y1 = cc.pos.y + cc.half_extents.y;
-    const float z0 = cc.pos.z - cc.half_extents.z, z1 = cc.pos.z + cc.half_extents.z;
+    const float x0 = cc.pos.x - cc.half_extents.x,
+                x1 = cc.pos.x + cc.half_extents.x;
+    const float y0 = cc.pos.y - cc.half_extents.y,
+                y1 = cc.pos.y + cc.half_extents.y;
+    const float z0 = cc.pos.z - cc.half_extents.z,
+                z1 = cc.pos.z + cc.half_extents.z;
     // Bottom face
-    verts.push_back({x0,y0,z0,color}); verts.push_back({x1,y0,z0,color});
-    verts.push_back({x1,y0,z0,color}); verts.push_back({x1,y0,z1,color});
-    verts.push_back({x1,y0,z1,color}); verts.push_back({x0,y0,z1,color});
-    verts.push_back({x0,y0,z1,color}); verts.push_back({x0,y0,z0,color});
+    verts.push_back({x0, y0, z0, color});
+    verts.push_back({x1, y0, z0, color});
+    verts.push_back({x1, y0, z0, color});
+    verts.push_back({x1, y0, z1, color});
+    verts.push_back({x1, y0, z1, color});
+    verts.push_back({x0, y0, z1, color});
+    verts.push_back({x0, y0, z1, color});
+    verts.push_back({x0, y0, z0, color});
     // Top face
-    verts.push_back({x0,y1,z0,color}); verts.push_back({x1,y1,z0,color});
-    verts.push_back({x1,y1,z0,color}); verts.push_back({x1,y1,z1,color});
-    verts.push_back({x1,y1,z1,color}); verts.push_back({x0,y1,z1,color});
-    verts.push_back({x0,y1,z1,color}); verts.push_back({x0,y1,z0,color});
+    verts.push_back({x0, y1, z0, color});
+    verts.push_back({x1, y1, z0, color});
+    verts.push_back({x1, y1, z0, color});
+    verts.push_back({x1, y1, z1, color});
+    verts.push_back({x1, y1, z1, color});
+    verts.push_back({x0, y1, z1, color});
+    verts.push_back({x0, y1, z1, color});
+    verts.push_back({x0, y1, z0, color});
     // Verticals
-    verts.push_back({x0,y0,z0,color}); verts.push_back({x0,y1,z0,color});
-    verts.push_back({x1,y0,z0,color}); verts.push_back({x1,y1,z0,color});
-    verts.push_back({x1,y0,z1,color}); verts.push_back({x1,y1,z1,color});
-    verts.push_back({x0,y0,z1,color}); verts.push_back({x0,y1,z1,color});
+    verts.push_back({x0, y0, z0, color});
+    verts.push_back({x0, y1, z0, color});
+    verts.push_back({x1, y0, z0, color});
+    verts.push_back({x1, y1, z0, color});
+    verts.push_back({x1, y0, z1, color});
+    verts.push_back({x1, y1, z1, color});
+    verts.push_back({x0, y0, z1, color});
+    verts.push_back({x0, y1, z1, color});
   }
 
   const bgfx::Memory *mem =
@@ -193,10 +216,14 @@ bool GameState::init(const char *level_path, int width, int height) {
     wall_vbh_ = engine::create_vertex_buffer(meshes.wall_vertices, layout_);
     stair_vbh_ = engine::create_vertex_buffer(meshes.stair_vertices, layout_);
 
-    wf_wall_vbh_  = build_wireframe_vbh(meshes.wall_vertices,  0xff44ff44u); // green
-    wf_floor_vbh_ = build_wireframe_vbh(meshes.floor_vertices, 0xff44ccffu); // blue
-    wf_stair_vbh_ = build_wireframe_vbh(meshes.stair_vertices, 0xffff8844u); // orange
-    wf_clip_vbh_  = build_clip_cube_vbh(level_.clipping_cubes, 0xffdd44aau); // magenta
+    wf_wall_vbh_ =
+        build_wireframe_vbh(meshes.wall_vertices, 0xff44ff44u); // green
+    wf_floor_vbh_ =
+        build_wireframe_vbh(meshes.floor_vertices, 0xff44ccffu); // blue
+    wf_stair_vbh_ =
+        build_wireframe_vbh(meshes.stair_vertices, 0xffff8844u); // orange
+    wf_clip_vbh_ =
+        build_clip_cube_vbh(level_.clipping_cubes, 0xffdd44aau); // magenta
   }
 
   // Shaders
@@ -309,6 +336,19 @@ bool GameState::init(const char *level_path, int width, int height) {
   for (auto &z : zombies_)
     z.init_jolt(jolt_);
 
+  {
+    std::string err;
+    door_params_.pos[0] = 4.5f;
+    door_params_.pos[1] = 0.0f;
+    door_params_.pos[2] = 5.5f;
+    door_params_.yaw = 0.0f;
+    door_params_.scale = 0.011f;
+    if (!door_.load(ENGINE_MODELS_DIR "/door/door_frame.glb",
+                    ENGINE_MODELS_DIR "/door/door_leaf.glb", err))
+      LOG_WARN("door: %s", err.c_str());
+    door_.init_jolt(jolt_, door_params_);
+  }
+
   return true;
 }
 
@@ -323,6 +363,8 @@ void GameState::shutdown() {
   engine::audio_shutdown();
   engine::hud_shutdown();
   jolt_.shutdown();
+
+  door_.unload();
 
   for (auto &m : models_)
     m->unload();
@@ -421,6 +463,9 @@ void GameState::on_resize(int width, int height) {
 
 void GameState::handle_event(const SDL_Event &event) {
   player_.handle_event(event);
+  if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_e &&
+      !event.key.repeat)
+    interact_pressed_ = true;
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c &&
       !event.key.repeat)
     show_collision_ = !show_collision_;
@@ -441,6 +486,8 @@ void GameState::update(float dt) {
   player_.update(dt, jolt_);
   sys_shooting();
   sys_zombie_ai(dt);
+  sys_interact_door();
+  door_.update(dt);
   particles_.update(dt);
 }
 
@@ -500,6 +547,21 @@ void GameState::sys_zombie_ai(float dt) {
     z.update(dt, player_, jolt_);
 }
 
+// --- system: door interaction ---
+
+void GameState::sys_interact_door() {
+  constexpr float k_interact_radius = 2.0f;
+  const FpsCamera &cam = player_.camera();
+  const float dx = cam.eyeX - door_params_.pos[0];
+  const float dz = cam.eyeZ - door_params_.pos[2];
+  near_door_ = (dx * dx + dz * dz) < (k_interact_radius * k_interact_radius);
+
+  if (interact_pressed_ && near_door_) {
+    door_.is_open() ? door_.close() : door_.open();
+  }
+  interact_pressed_ = false;
+}
+
 // ============================================================
 // Render
 // ============================================================
@@ -526,6 +588,10 @@ void GameState::render(int width, int height) {
   bgfx::setUniform(u_cam_pos_, cam_pos);
 
   sys_render_level();
+  if (door_.valid())
+    door_.submit_world(0, program_, s_albedo_, s_normal_, s_roughness_,
+                       white_tex_, flat_normal_tex_, white_tex_, render_state_,
+                       door_params_);
   sys_render_bullet_holes();
   sys_render_characters();
   particles_.render(0, debug_program_);
@@ -1015,6 +1081,13 @@ void GameState::sys_render_hud() {
   engine::hud_draw_text_right(buf, float(width_) - margin_x, baseline_y,
                               k_hud_red);
 
+  if (near_door_) {
+    const char *hint = door_.is_open() ? "[E] Close door" : "[E] Open door";
+    const float hint_y = float(height_) * 0.5f + 40.f;
+    engine::hud_draw_text(hint, float(width_) * 0.5f - 56.f, hint_y,
+                          0xffffffff);
+  }
+
   constexpr float dot = 3.f;
   engine::hud_draw_solid_rect((float(width_) - dot) * 0.5f,
                               (float(height_) - dot) * 0.5f, dot, dot,
@@ -1023,14 +1096,13 @@ void GameState::sys_render_hud() {
 
 void GameState::sys_render_debug_text() {
   bgfx::dbgTextClear();
-  bgfx::dbgTextPrintf(0, 1, 0x0f,
-                      "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   "
-                      "L: lights=%s   Z: wireframe=%s   LMB:Shoot R:Reload",
-                      player_.mouse_look() ? "free cursor" : "capture",
-                      player_.show_axes_gizmo() ? "on" : "off",
-                      show_collision_ ? "on" : "off",
-                      show_lights_ ? "on" : "off",
-                      show_wireframe_ ? "on" : "off");
+  bgfx::dbgTextPrintf(
+      0, 1, 0x0f,
+      "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   "
+      "L: lights=%s   Z: wireframe=%s   LMB:Shoot R:Reload",
+      player_.mouse_look() ? "free cursor" : "capture",
+      player_.show_axes_gizmo() ? "on" : "off", show_collision_ ? "on" : "off",
+      show_lights_ ? "on" : "off", show_wireframe_ ? "on" : "off");
   bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
                       level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
                       level_.sectors.size(), level_.walls.size(),

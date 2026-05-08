@@ -121,10 +121,12 @@ add_executable(fps_engine
   src/engine/shader_program.cpp
   src/engine/texture_loader.cpp
   src/engine/rigged_model.cpp
+  src/engine/model.cpp
   src/game/animator.cpp
   src/game/player.cpp
   src/game/zombie.cpp
   src/game/particles.cpp
+  src/game/door.cpp
   src/engine/window.cpp
   src/engine/hud.cpp
   shaders/vs_triangle.sc
