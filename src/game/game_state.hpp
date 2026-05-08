@@ -46,6 +46,7 @@ private:
   void sys_render_bullet_holes();
   void sys_render_collision_debug();
   void sys_render_debug_lights();
+  void sys_render_wireframe();
   void sys_render_hud();
   void sys_render_debug_text();
 
@@ -74,6 +75,9 @@ private:
   bgfx::VertexBufferHandle wall_vbh_ = BGFX_INVALID_HANDLE;
   bgfx::VertexBufferHandle stair_vbh_ = BGFX_INVALID_HANDLE;
   bgfx::VertexBufferHandle bulb_vbh_ = BGFX_INVALID_HANDLE;
+  bgfx::VertexBufferHandle wf_wall_vbh_ = BGFX_INVALID_HANDLE;
+  bgfx::VertexBufferHandle wf_floor_vbh_ = BGFX_INVALID_HANDLE;
+  bgfx::VertexBufferHandle wf_stair_vbh_ = BGFX_INVALID_HANDLE;
   bgfx::IndexBufferHandle bulb_ibh_ = BGFX_INVALID_HANDLE;
   bgfx::IndexBufferHandle cube_ibh_ = BGFX_INVALID_HANDLE;
 
@@ -106,6 +110,7 @@ private:
   bool hud_ok_ = false;
   bool show_collision_ = false;
   bool show_lights_ = false;
+  bool show_wireframe_ = false;
   uint64_t render_state_ = 0;
   int width_ = 1280;
   int height_ = 720;

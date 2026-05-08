@@ -46,6 +46,38 @@
 #define ENGINE_FONTS_DIR "fonts"
 #endif
 
+// Build a static line-list VBH from a triangle soup (every 3 LitVertices = 1 triangle).
+// Emits 3 edges per triangle as vertex pairs for BGFX_STATE_PT_LINES.
+static bgfx::VertexBufferHandle build_wireframe_vbh(const std::vector<LitVertex> &tris,
+                                                    uint32_t color) {
+  if (tris.size() < 3)
+    return BGFX_INVALID_HANDLE;
+
+  bgfx::VertexLayout layout;
+  layout.begin()
+      .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+      .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+      .end();
+
+  struct V { float x, y, z; uint32_t abgr; };
+  std::vector<V> verts;
+  verts.reserve(tris.size() * 2); // 3 edges × 2 verts per triangle
+
+  for (size_t i = 0; i + 2 < tris.size(); i += 3) {
+    const LitVertex &a = tris[i], &b = tris[i + 1], &c = tris[i + 2];
+    verts.push_back({a.x, a.y, a.z, color});
+    verts.push_back({b.x, b.y, b.z, color});
+    verts.push_back({b.x, b.y, b.z, color});
+    verts.push_back({c.x, c.y, c.z, color});
+    verts.push_back({c.x, c.y, c.z, color});
+    verts.push_back({a.x, a.y, a.z, color});
+  }
+
+  const bgfx::Memory *mem =
+      bgfx::copy(verts.data(), uint32_t(verts.size() * sizeof(V)));
+  return bgfx::createVertexBuffer(mem, layout);
+}
+
 // ============================================================
 // Construction / destruction
 // ============================================================
@@ -118,6 +150,10 @@ bool GameState::init(const char *level_path, int width, int height) {
     floor_vbh_ = engine::create_vertex_buffer(meshes.floor_vertices, layout_);
     wall_vbh_ = engine::create_vertex_buffer(meshes.wall_vertices, layout_);
     stair_vbh_ = engine::create_vertex_buffer(meshes.stair_vertices, layout_);
+
+    wf_wall_vbh_  = build_wireframe_vbh(meshes.wall_vertices,  0xff44ff44u); // green
+    wf_floor_vbh_ = build_wireframe_vbh(meshes.floor_vertices, 0xff44ccffu); // blue
+    wf_stair_vbh_ = build_wireframe_vbh(meshes.stair_vertices, 0xffff8844u); // orange
   }
 
   // Shaders
@@ -274,6 +310,9 @@ void GameState::shutdown() {
   dvb(wall_vbh_);
   dvb(stair_vbh_);
   dvb(bulb_vbh_);
+  dvb(wf_wall_vbh_);
+  dvb(wf_floor_vbh_);
+  dvb(wf_stair_vbh_);
   dib(bulb_ibh_);
   dib(cube_ibh_);
 
@@ -344,6 +383,9 @@ void GameState::handle_event(const SDL_Event &event) {
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_l &&
       !event.key.repeat)
     show_lights_ = !show_lights_;
+  if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_z &&
+      !event.key.repeat)
+    show_wireframe_ = !show_wireframe_;
 }
 
 // ============================================================
@@ -443,6 +485,8 @@ void GameState::render(int width, int height) {
   sys_render_bullet_holes();
   sys_render_characters();
   particles_.render(0, debug_program_);
+  if (show_wireframe_)
+    sys_render_wireframe();
   if (show_collision_)
     sys_render_collision_debug();
   if (show_lights_)
@@ -880,6 +924,30 @@ void GameState::sys_render_debug_lights() {
   }
 }
 
+void GameState::sys_render_wireframe() {
+  if (!bgfx::isValid(debug_program_))
+    return;
+
+  float mtx[16];
+  bx::mtxIdentity(mtx);
+  // LEQUAL so lines land exactly on the surface without z-fighting.
+  const uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                         BGFX_STATE_DEPTH_TEST_LEQUAL | BGFX_STATE_PT_LINES;
+
+  auto draw = [&](bgfx::VertexBufferHandle vbh) {
+    if (!bgfx::isValid(vbh))
+      return;
+    bgfx::setState(state);
+    bgfx::setTransform(mtx);
+    bgfx::setVertexBuffer(0, vbh);
+    bgfx::submit(0, debug_program_);
+  };
+
+  draw(wf_wall_vbh_);
+  draw(wf_floor_vbh_);
+  draw(wf_stair_vbh_);
+}
+
 void GameState::sys_render_hud() {
   if (!hud_ok_)
     return;
@@ -912,11 +980,12 @@ void GameState::sys_render_debug_text() {
   bgfx::dbgTextClear();
   bgfx::dbgTextPrintf(0, 1, 0x0f,
                       "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   "
-                      "L: lights=%s   LMB:Shoot R:Reload",
+                      "L: lights=%s   Z: wireframe=%s   LMB:Shoot R:Reload",
                       player_.mouse_look() ? "free cursor" : "capture",
                       player_.show_axes_gizmo() ? "on" : "off",
                       show_collision_ ? "on" : "off",
-                      show_lights_ ? "on" : "off");
+                      show_lights_ ? "on" : "off",
+                      show_wireframe_ ? "on" : "off");
   bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
                       level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
                       level_.sectors.size(), level_.walls.size(),
