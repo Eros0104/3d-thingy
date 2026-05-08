@@ -14,6 +14,7 @@ const level = {
   walls: [],
   stairs: [],
   lights: [],
+  clipping_cubes: [],
 };
 
 // Editor-side room registry. Walls and sectors carry roomId; rooms[] is source of truth for bounds.
@@ -159,6 +160,7 @@ function render() {
   draw_grid(w, h);
   draw_sectors();
   draw_walls();
+  draw_clipping_cubes();
   draw_stairs();
   draw_lights();
   draw_spawn();
@@ -245,6 +247,30 @@ function draw_walls() {
     ctx.stroke();
   }
   ctx.lineCap = 'butt';
+}
+
+function draw_clipping_cubes() {
+  const sel = editor.selection;
+  for (let i = 0; i < level.clipping_cubes.length; i++) {
+    const cc = level.clipping_cubes[i];
+    const is_sel = sel?.kind === 'clip_cube' && sel.idx === i;
+    const tl = world_to_screen(cc.min_x, cc.min_z);
+    const br = world_to_screen(cc.max_x, cc.max_z);
+    ctx.fillStyle   = is_sel ? 'rgba(221,68,170,0.2)' : 'rgba(221,68,170,0.1)';
+    ctx.strokeStyle = is_sel ? '#ff44cc' : '#dd44aa';
+    ctx.lineWidth   = is_sel ? 2 : 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const cx = (tl.x + br.x) / 2, cy = (tl.y + br.y) / 2;
+    ctx.fillStyle = '#dd44aa';
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`clip · y=${cc.pos_y}±${cc.half_y}`, cx, cy + 3);
+  }
 }
 
 function draw_stairs() {
@@ -351,6 +377,13 @@ function draw_draft() {
     const tl = world_to_screen(min_x, min_z), br = world_to_screen(max_x, max_z);
     ctx.strokeStyle = WALL_COLOR_SEL; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y); ctx.stroke();
+  } else if (d.kind === 'clip_cube') {
+    const m = editor.mouse_world;
+    const min_x = Math.min(d.start.x, m.x), max_x = Math.max(d.start.x, m.x);
+    const min_z = Math.min(d.start.z, m.z), max_z = Math.max(d.start.z, m.z);
+    const tl = world_to_screen(min_x, min_z), br = world_to_screen(max_x, max_z);
+    ctx.strokeStyle = '#ff44cc'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y); ctx.stroke();
   } else if (d.kind === 'stair') {
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
     const a = world_to_screen(d.a[0], d.a[1]);
@@ -375,6 +408,18 @@ function draw_selection_handles() {
       const sp = world_to_screen(cx, cz);
       ctx.fillStyle = WALL_COLOR_SEL;
       ctx.beginPath(); ctx.arc(sp.x, sp.y, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#0c0e13'; ctx.lineWidth = 1; ctx.stroke();
+    }
+  } else if (sel.kind === 'clip_cube') {
+    const cc = level.clipping_cubes[sel.idx];
+    if (!cc) return;
+    for (const [cx, cz] of [
+      [cc.min_x, cc.min_z], [cc.max_x, cc.min_z],
+      [cc.max_x, cc.max_z], [cc.min_x, cc.max_z],
+    ]) {
+      const sp = world_to_screen(cx, cz);
+      ctx.fillStyle = '#ff44cc';
+      ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#0c0e13'; ctx.lineWidth = 1; ctx.stroke();
     }
   } else if (sel.kind === 'stair' || sel.kind === 'stair_vertex') {
@@ -428,7 +473,7 @@ function hit_test(wx, wz) {
     if (d < px_tol && d < best_dist) { best = { kind, idx, sub }; best_dist = d; }
   };
 
-  // Room corners — highest priority so resize handles always win over body clicks
+  // Room and clip_cube corners — highest priority so resize handles always win over body clicks
   for (let i = 0; i < rooms.length; i++) {
     const r = rooms[i];
     for (const [corner, cx, cz] of [
@@ -437,6 +482,16 @@ function hit_test(wx, wz) {
     ]) {
       const d = Math.sqrt((wx - cx) ** 2 + (wz - cz) ** 2);
       if (d < px_tol && d < best_dist) { best = { kind: 'room', idx: i, corner }; best_dist = d; }
+    }
+  }
+  for (let i = 0; i < level.clipping_cubes.length; i++) {
+    const cc = level.clipping_cubes[i];
+    for (const [corner, cx, cz] of [
+      ['TL', cc.min_x, cc.min_z], ['TR', cc.max_x, cc.min_z],
+      ['BR', cc.max_x, cc.max_z], ['BL', cc.min_x, cc.max_z],
+    ]) {
+      const d = Math.sqrt((wx - cx) ** 2 + (wz - cz) ** 2);
+      if (d < px_tol && d < best_dist) { best = { kind: 'clip_cube', idx: i, corner }; best_dist = d; }
     }
   }
   if (best) return best;
@@ -468,6 +523,14 @@ function hit_test(wx, wz) {
     if (point_in_polygon(s.polygon, wx, wz)) {
       const ri = rooms.findIndex(r => r.id === s.roomId);
       if (ri >= 0) return { kind: 'room', idx: ri, corner: null };
+    }
+  }
+
+  // Clip_cube body
+  for (let i = 0; i < level.clipping_cubes.length; i++) {
+    const cc = level.clipping_cubes[i];
+    if (wx >= cc.min_x && wx <= cc.max_x && wz >= cc.min_z && wz <= cc.max_z) {
+      return { kind: 'clip_cube', idx: i, corner: null };
     }
   }
 
@@ -516,6 +579,12 @@ canvas.addEventListener('mousedown', (ev) => {
           wx: w.x, wz: w.z,
           room_bounds: { min_x: room.min_x, min_z: room.min_z, max_x: room.max_x, max_z: room.max_z },
         };
+      } else if (norm?.kind === 'clip_cube') {
+        const cc = level.clipping_cubes[norm.idx];
+        editor.drag_anchor = {
+          wx: w.x, wz: w.z,
+          cube_bounds: { min_x: cc.min_x, min_z: cc.min_z, max_x: cc.max_x, max_z: cc.max_z },
+        };
       } else {
         editor.drag_anchor = null;
       }
@@ -524,6 +593,10 @@ canvas.addEventListener('mousedown', (ev) => {
     }
     case 'drag_room': {
       editor.draft = { kind: 'room', start: { x: w.x, z: w.z } };
+      break;
+    }
+    case 'clip_cube': {
+      editor.draft = { kind: 'clip_cube', start: { x: w.x, z: w.z } };
       break;
     }
     case 'stair': {
@@ -581,6 +654,22 @@ canvas.addEventListener('mouseup', () => {
       refresh_selection_panel();
     }
     refresh_counts();
+    render();
+  } else if (editor.tool === 'clip_cube' && editor.draft?.kind === 'clip_cube') {
+    const start = editor.draft.start;
+    const m = editor.mouse_world;
+    const min_x = Math.min(start.x, m.x), max_x = Math.max(start.x, m.x);
+    const min_z = Math.min(start.z, m.z), max_z = Math.max(start.z, m.z);
+    editor.draft = null;
+    if (max_x - min_x >= 0.3 && max_z - min_z >= 0.3) {
+      const pos_y = editor.default_floor_y + (editor.default_ceiling_y - editor.default_floor_y) / 2;
+      const half_y = (editor.default_ceiling_y - editor.default_floor_y) / 2;
+      level.clipping_cubes.push({ min_x, min_z, max_x, max_z, pos_y, half_y });
+      const idx = level.clipping_cubes.length - 1;
+      editor.selection = { kind: 'clip_cube', idx, corner: null };
+      refresh_selection_panel();
+      refresh_counts();
+    }
     render();
   }
 });
@@ -641,6 +730,27 @@ function apply_drag(w) {
     const s = level.stairs[sel.idx];
     if (sel.sub === 'a') s.center_a = [w.x, w.z];
     else                 s.center_b = [w.x, w.z];
+  } else if (sel.kind === 'clip_cube') {
+    const cc = level.clipping_cubes[sel.idx];
+    if (!cc) return;
+    if (sel.corner) {
+      switch (sel.corner) {
+        case 'TL': cc.min_x = w.x; cc.min_z = w.z; break;
+        case 'TR': cc.max_x = w.x; cc.min_z = w.z; break;
+        case 'BR': cc.max_x = w.x; cc.max_z = w.z; break;
+        case 'BL': cc.min_x = w.x; cc.max_z = w.z; break;
+      }
+      if (cc.min_x > cc.max_x) [cc.min_x, cc.max_x] = [cc.max_x, cc.min_x];
+      if (cc.min_z > cc.max_z) [cc.min_z, cc.max_z] = [cc.max_z, cc.min_z];
+    } else if (editor.drag_anchor) {
+      const dx = w.x - editor.drag_anchor.wx;
+      const dz = w.z - editor.drag_anchor.wz;
+      const orig = editor.drag_anchor.cube_bounds;
+      cc.min_x = orig.min_x + dx;
+      cc.max_x = orig.max_x + dx;
+      cc.min_z = orig.min_z + dz;
+      cc.max_z = orig.max_z + dz;
+    }
   } else if (sel.kind === 'light') {
     level.lights[sel.idx].pos[0] = w.x;
     level.lights[sel.idx].pos[2] = w.z;
@@ -657,6 +767,8 @@ function delete_selection() {
     delete_room(sel.idx);
   } else if (sel.kind === 'stair' || sel.kind === 'stair_vertex') {
     level.stairs.splice(sel.idx, 1);
+  } else if (sel.kind === 'clip_cube') {
+    level.clipping_cubes.splice(sel.idx, 1);
   } else if (sel.kind === 'light') {
     level.lights.splice(sel.idx, 1);
   }
@@ -679,6 +791,9 @@ function refresh_selection_panel() {
   } else if (sel.kind === 'stair' || sel.kind === 'stair_vertex') {
     info.innerHTML = render_stair_edit(sel.idx, level.stairs[sel.idx]);
     wire_stair_edit(sel.idx);
+  } else if (sel.kind === 'clip_cube') {
+    info.innerHTML = render_clip_cube_edit(sel.idx, level.clipping_cubes[sel.idx]);
+    wire_clip_cube_edit(sel.idx);
   } else if (sel.kind === 'light') {
     info.innerHTML = render_light_edit(sel.idx, level.lights[sel.idx]);
     wire_light_edit(sel.idx);
@@ -747,6 +862,23 @@ function wire_light_edit(i) {
   document.getElementById('f-light-rad').oninput = (e) => { L.radius    = parseFloat(e.target.value); render(); };
 }
 
+function render_clip_cube_edit(i, cc) {
+  if (!cc) return '<div>—</div>';
+  const w = (cc.max_x - cc.min_x).toFixed(2);
+  const d = (cc.max_z - cc.min_z).toFixed(2);
+  return `
+    <div>clip_cube ${i} &middot; ${w}&times;${d}m</div>
+    ${field('f-cc-py', 'pos_y (center)', cc.pos_y)}
+    ${field('f-cc-hy', 'half_y', cc.half_y)}
+  `;
+}
+function wire_clip_cube_edit(i) {
+  const cc = level.clipping_cubes[i];
+  if (!cc) return;
+  document.getElementById('f-cc-py').oninput = (e) => { cc.pos_y  = parseFloat(e.target.value); render(); };
+  document.getElementById('f-cc-hy').oninput = (e) => { cc.half_y = parseFloat(e.target.value); render(); };
+}
+
 function render_spawn_edit() {
   return `<div>spawn</div>
     ${field('f-spawn-y', 'pos.y', level.spawn.pos[1])}
@@ -765,7 +897,8 @@ function refresh_counts() {
     `<div>sectors</div><div>${level.sectors.length}</div>` +
     `<div>walls</div><div>${level.walls.length}</div>` +
     `<div>stairs</div><div>${level.stairs.length}</div>` +
-    `<div>lights</div><div>${level.lights.length}</div>`;
+    `<div>lights</div><div>${level.lights.length}</div>` +
+    `<div>clips</div><div>${level.clipping_cubes.length}</div>`;
 }
 
 // -------- Tool UI --------------------------------------------------------------------
@@ -777,6 +910,7 @@ const TOOL_HINTS = {
   light:    'click to place a point light.',
   spawn:    'click to set player spawn position.',
   erase:    'click anything to delete it.',
+  clip_cube:'drag to place a clipping cube (carves holes in overlapping walls).',
 };
 
 document.querySelectorAll('.tool-palette button').forEach((btn) => {
@@ -813,6 +947,10 @@ document.getElementById('export-json').onclick = () => {
     walls: level.walls,
     stairs: level.stairs,
     lights: level.lights,
+    clipping_cubes: level.clipping_cubes.map(cc => ({
+      pos: [(cc.min_x + cc.max_x) / 2, cc.pos_y, (cc.min_z + cc.max_z) / 2],
+      half_extents: [(cc.max_x - cc.min_x) / 2, cc.half_y, (cc.max_z - cc.min_z) / 2],
+    })),
     editorRefs: {
       rooms: rooms.map(r => ({
         id: r.id,
@@ -868,6 +1006,14 @@ function import_level(text) {
   level.lights = (obj.lights ?? []).map(L => ({
     pos: L.pos, color: L.color ?? [2.4, 2.1, 1.7], intensity: L.intensity ?? 1.0, radius: L.radius ?? 8.0,
   }));
+  level.clipping_cubes = (obj.clipping_cubes ?? []).map(cc => ({
+    min_x: cc.pos[0] - cc.half_extents[0],
+    max_x: cc.pos[0] + cc.half_extents[0],
+    min_z: cc.pos[2] - cc.half_extents[2],
+    max_z: cc.pos[2] + cc.half_extents[2],
+    pos_y: cc.pos[1],
+    half_y: cc.half_extents[1],
+  }));
 
   rooms.length = 0;
   for (const r of obj.editorRefs?.rooms ?? []) {
@@ -892,6 +1038,7 @@ function frame_to_content() {
   for (const s of level.sectors) for (const p of s.polygon) pts.push([p[0], p[1]]);
   for (const w of level.walls) { pts.push([w.a[0], w.a[2]]); pts.push([w.b[0], w.b[2]]); }
   for (const s of level.stairs) { pts.push(s.center_a); pts.push(s.center_b); }
+  for (const cc of level.clipping_cubes) { pts.push([cc.min_x, cc.min_z]); pts.push([cc.max_x, cc.max_z]); }
   if (!pts.length) return;
   let minx = Infinity, maxx = -Infinity, minz = Infinity, maxz = -Infinity;
   for (const p of pts) {

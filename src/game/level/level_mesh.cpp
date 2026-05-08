@@ -176,9 +176,19 @@ void emit_vertical_quad(
 	push_v(out, a.x, y1, a.z, nx, 0, nz, u0, v1, abgr);
 }
 
-/// Emit a wall plane with zero or more brush cutouts. Brushes are sorted by offset and may not
-/// overlap. Any brush partially outside the wall's extents is clamped silently.
-void emit_wall(std::vector<LitVertex>& out, const Wall& w, std::vector<const Brush*> brushes)
+/// A rectangular hole cut into a wall, in wall-local coordinates.
+/// `frame` = true  → emit door/window trim strips around the opening.
+/// `frame` = false → raw structural cut (ClippingCube), no trim.
+struct CutRegion {
+	float offset;   // world units along wall from a
+	float width;    // horizontal extent
+	float y_start;  // world Y of bottom edge
+	float height;   // vertical extent
+	bool  frame;
+};
+
+/// Emit a wall plane with zero or more rectangular cut-outs.
+void emit_wall(std::vector<LitVertex>& out, const Wall& w, std::vector<CutRegion> cuts)
 {
 	const float dx = w.b.x - w.a.x;
 	const float dz = w.b.z - w.a.z;
@@ -195,9 +205,9 @@ void emit_wall(std::vector<LitVertex>& out, const Wall& w, std::vector<const Bru
 	const float top_y = base_y + w.height;
 	const float total_u = horiz_len * k_wall_uv_scale;
 
-	// Sort by horizontal offset along the wall so we can walk left-to-right.
-	std::sort(brushes.begin(), brushes.end(), [](const Brush* a, const Brush* b) {
-		return a->offset < b->offset;
+	// Sort cuts left-to-right so we can walk the wall in one pass.
+	std::sort(cuts.begin(), cuts.end(), [](const CutRegion& a, const CutRegion& b) {
+		return a.offset < b.offset;
 	});
 
 	// Emit a quad strip at parametric positions [t0, t1] and world Y [y0, y1].
@@ -210,37 +220,36 @@ void emit_wall(std::vector<LitVertex>& out, const Wall& w, std::vector<const Bru
 
 	float cursor = 0.0f; // world-unit position along wall
 
-	for (const Brush* br : brushes) {
-		const float br_off = std::max(0.0f, std::min(br->offset, horiz_len));
-		const float br_end = std::max(br_off, std::min(br->offset + br->width, horiz_len));
-		const float br_y0 = std::max(br->y_start, base_y);
-		const float br_y1 = std::min(br->y_start + br->height, top_y);
+	for (const CutRegion& cut : cuts) {
+		const float c_off = std::max(0.0f, std::min(cut.offset,                horiz_len));
+		const float c_end = std::max(c_off, std::min(cut.offset + cut.width,   horiz_len));
+		const float c_y0  = std::max(cut.y_start,                base_y);
+		const float c_y1  = std::min(cut.y_start + cut.height,  top_y);
 
-		const float t_off = br_off / horiz_len;
-		const float t_end = br_end / horiz_len;
+		const float t_off = c_off / horiz_len;
+		const float t_end = c_end / horiz_len;
 
-		// Solid strip before this brush
-		if (br_off > cursor + 1e-6f) {
+		// Solid strip before this cut
+		if (c_off > cursor + 1e-6f) {
 			emit_strip(cursor / horiz_len, t_off, base_y, top_y);
 		}
-
-		// Within brush area: emit solid strips above and below the opening
-		if (br_y0 > base_y + 1e-6f) {
-			emit_strip(t_off, t_end, base_y, br_y0);
+		// Solid above and below the opening
+		if (c_y0 > base_y + 1e-6f) {
+			emit_strip(t_off, t_end, base_y, c_y0);
 		}
-		if (br_y1 < top_y - 1e-6f) {
-			emit_strip(t_off, t_end, br_y1, top_y);
+		if (c_y1 < top_y - 1e-6f) {
+			emit_strip(t_off, t_end, c_y1, top_y);
 		}
 
-		cursor = br_end;
+		cursor = c_end;
 	}
 
-	// Solid strip after the last brush
+	// Solid strip after the last cut
 	if (cursor < horiz_len - 1e-6f) {
 		emit_strip(cursor / horiz_len, 1.0f, base_y, top_y);
 	}
 
-	// Door/window frames: trim strips straddling each opening edge, pushed slightly forward.
+	// Trim frames: only for brush cuts (doors/windows), not ClippingCube cuts.
 	{
 		const float hw_y = k_frame_width * 0.5f;
 		const float ox = nx * k_frame_push;
@@ -256,27 +265,23 @@ void emit_wall(std::vector<LitVertex>& out, const Wall& w, std::vector<const Bru
 				t0 * total_u, t1 * total_u, nx, nz, k_frame_abgr);
 		};
 
-		for (const Brush* br : brushes) {
-			const float br_off = std::max(0.0f, std::min(br->offset, horiz_len));
-			const float br_end = std::max(br_off, std::min(br->offset + br->width, horiz_len));
-			const float br_y0 = std::max(br->y_start, base_y);
-			const float br_y1 = std::min(br->y_start + br->height, top_y);
-			if (br_end - br_off < 1e-6f || br_y1 - br_y0 < 1e-6f) continue;
+		for (const CutRegion& cut : cuts) {
+			if (!cut.frame) continue;
+			const float c_off = std::max(0.0f, std::min(cut.offset,             horiz_len));
+			const float c_end = std::max(c_off, std::min(cut.offset + cut.width, horiz_len));
+			const float c_y0  = std::max(cut.y_start,               base_y);
+			const float c_y1  = std::min(cut.y_start + cut.height,  top_y);
+			if (c_end - c_off < 1e-6f || c_y1 - c_y0 < 1e-6f) continue;
 
-			const float t_off = br_off / horiz_len;
-			const float t_end = br_end / horiz_len;
-			const float hw_u = hw_y / horiz_len;
+			const float t_off = c_off / horiz_len;
+			const float t_end = c_end / horiz_len;
+			const float hw_u  = hw_y / horiz_len;
 
-			// Left and right jambs: straddle horizontal edges, extend past opening corners
-			emit_frame_strip(t_off - hw_u, t_off + hw_u, br_y0 - hw_y, br_y1 + hw_y);
-			emit_frame_strip(t_end - hw_u, t_end + hw_u, br_y0 - hw_y, br_y1 + hw_y);
-
-			// Header: fits between jambs, straddles the top edge
-			emit_frame_strip(t_off + hw_u, t_end - hw_u, br_y1 - hw_y, br_y1 + hw_y);
-
-			// Sill: only for windows (opening not starting at wall base)
-			if (br_y0 > base_y + 1e-6f) {
-				emit_frame_strip(t_off + hw_u, t_end - hw_u, br_y0 - hw_y, br_y0 + hw_y);
+			emit_frame_strip(t_off - hw_u, t_off + hw_u, c_y0 - hw_y, c_y1 + hw_y);
+			emit_frame_strip(t_end - hw_u, t_end + hw_u, c_y0 - hw_y, c_y1 + hw_y);
+			emit_frame_strip(t_off + hw_u, t_end - hw_u, c_y1 - hw_y, c_y1 + hw_y);
+			if (c_y0 > base_y + 1e-6f) {
+				emit_frame_strip(t_off + hw_u, t_end - hw_u, c_y0 - hw_y, c_y0 + hw_y);
 			}
 		}
 	}
@@ -425,7 +430,48 @@ void build_level_meshes(const Level& level, LevelMeshOutput& out)
 	}
 
 	for (size_t i = 0; i < level.walls.size(); ++i) {
-		emit_wall(out.wall_vertices, level.walls[i], wall_brushes[i]);
+		const Wall& w = level.walls[i];
+		std::vector<CutRegion> cuts;
+
+		// Brush cuts (door/window openings with trim frames).
+		for (const Brush* br : wall_brushes[i]) {
+			cuts.push_back({ br->offset, br->width, br->y_start, br->height, true });
+		}
+
+		// ClippingCube cuts: project each AABB onto the wall plane and compute overlap.
+		const float ddx = w.b.x - w.a.x, ddz = w.b.z - w.a.z;
+		const float wlen = std::sqrt(ddx * ddx + ddz * ddz);
+		if (wlen > 1e-6f) {
+			const float ux = ddx / wlen, uz = ddz / wlen;
+			const float nx = -uz,         nz =  ux;
+			const float base_y = w.a.y,   top_y = base_y + w.height;
+
+			for (const ClippingCube& cc : level.clipping_cubes) {
+				// Distance from cube center to the wall's infinite plane.
+				const float d_perp = nx * (cc.pos.x - w.a.x) + nz * (cc.pos.z - w.a.z);
+				// Maximum reach of the AABB perpendicular to the wall.
+				const float r_perp = std::abs(nx) * cc.half_extents.x
+				                   + std::abs(nz) * cc.half_extents.z;
+				if (std::abs(d_perp) > r_perp) continue; // cube doesn't reach this wall
+
+				// Along-wall projection of the cube.
+				const float t_c = ux * (cc.pos.x - w.a.x) + uz * (cc.pos.z - w.a.z);
+				const float r_t = std::abs(ux) * cc.half_extents.x
+				                + std::abs(uz) * cc.half_extents.z;
+				const float t0  = std::max(0.0f, t_c - r_t);
+				const float t1  = std::min(wlen, t_c + r_t);
+				if (t1 <= t0 + 1e-6f) continue;
+
+				// Vertical overlap.
+				const float y0 = std::max(base_y, cc.pos.y - cc.half_extents.y);
+				const float y1 = std::min(top_y,  cc.pos.y + cc.half_extents.y);
+				if (y1 <= y0 + 1e-6f) continue;
+
+				cuts.push_back({ t0, t1 - t0, y0, y1 - y0, false });
+			}
+		}
+
+		emit_wall(out.wall_vertices, w, std::move(cuts));
 	}
 
 	// Depth panels: close the gap between paired parallel-wall openings.

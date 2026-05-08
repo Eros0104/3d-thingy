@@ -206,6 +206,23 @@ bool parse_stair(const json& js, Stair& out, std::string& err)
 	return true;
 }
 
+bool parse_clipping_cube(const json& jc, ClippingCube& out, std::string& err)
+{
+	if (!jc.contains("pos") || !parse_vec3(jc.at("pos"), out.pos)) {
+		err = "clipping_cube missing valid 'pos' [x, y, z]";
+		return false;
+	}
+	if (!jc.contains("half_extents") || !parse_vec3(jc.at("half_extents"), out.half_extents)) {
+		err = "clipping_cube missing valid 'half_extents' [x, y, z]";
+		return false;
+	}
+	if (out.half_extents.x <= 0.0f || out.half_extents.y <= 0.0f || out.half_extents.z <= 0.0f) {
+		err = "clipping_cube half_extents must all be > 0";
+		return false;
+	}
+	return true;
+}
+
 bool parse_light(const json& jl, Light& out, std::string& err)
 {
 	if (!jl.contains("pos") || !parse_vec3(jl.at("pos"), out.pos)) {
@@ -330,6 +347,20 @@ bool parse_json_level(const std::string& text, Level& out, std::string& err)
 				return false;
 			}
 			out.lights.push_back(l);
+		}
+	}
+
+	if (j.contains("clipping_cubes") && j.at("clipping_cubes").is_array()) {
+		const json& jcs = j.at("clipping_cubes");
+		out.clipping_cubes.reserve(jcs.size());
+		for (size_t i = 0; i < jcs.size(); ++i) {
+			ClippingCube cc;
+			std::string cerr;
+			if (!parse_clipping_cube(jcs[i], cc, cerr)) {
+				err = std::string("clipping_cubes[") + std::to_string(i) + "]: " + cerr;
+				return false;
+			}
+			out.clipping_cubes.push_back(cc);
 		}
 	}
 

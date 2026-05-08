@@ -74,6 +74,13 @@ struct Spawn {
 	float yaw_deg = 0.0f;
 };
 
+/// An axis-aligned box that carves a hole through any overlapping wall geometry.
+/// Position is the world-space center; half_extents are the positive half-sizes on each axis.
+struct ClippingCube {
+	Vec3 pos;
+	Vec3 half_extents{ 0.6f, 1.1f, 0.6f };
+};
+
 struct Level {
 	int version = 3;
 	std::string name;
@@ -85,6 +92,7 @@ struct Level {
 	std::vector<Brush> brushes;
 	std::vector<Stair> stairs;
 	std::vector<Light> lights;
+	std::vector<ClippingCube> clipping_cubes;
 };
 
 /// Signed area of a 2-D polygon (shoelace). Positive → counter-clockwise winding.

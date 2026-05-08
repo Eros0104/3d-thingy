@@ -78,6 +78,7 @@ private:
   bgfx::VertexBufferHandle wf_wall_vbh_ = BGFX_INVALID_HANDLE;
   bgfx::VertexBufferHandle wf_floor_vbh_ = BGFX_INVALID_HANDLE;
   bgfx::VertexBufferHandle wf_stair_vbh_ = BGFX_INVALID_HANDLE;
+  bgfx::VertexBufferHandle wf_clip_vbh_ = BGFX_INVALID_HANDLE;
   bgfx::IndexBufferHandle bulb_ibh_ = BGFX_INVALID_HANDLE;
   bgfx::IndexBufferHandle cube_ibh_ = BGFX_INVALID_HANDLE;
 

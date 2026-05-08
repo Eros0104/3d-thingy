@@ -164,6 +164,16 @@ void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes)
 		write_f32(out_bytes, l.intensity);
 		write_f32(out_bytes, l.radius);
 	}
+
+	write_u32(out_bytes, static_cast<uint32_t>(level.clipping_cubes.size()));
+	for (const ClippingCube& cc : level.clipping_cubes) {
+		write_f32(out_bytes, cc.pos.x);
+		write_f32(out_bytes, cc.pos.y);
+		write_f32(out_bytes, cc.pos.z);
+		write_f32(out_bytes, cc.half_extents.x);
+		write_f32(out_bytes, cc.half_extents.y);
+		write_f32(out_bytes, cc.half_extents.z);
+	}
 }
 
 bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::string& err)
@@ -263,6 +273,20 @@ bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::strin
 		}
 		if (version >= 5) {
 			if (!r.read_f32(l.radius)) { err = "truncated light radius"; return false; }
+		}
+	}
+
+	if (version >= 6) {
+		uint32_t ncc = 0;
+		if (!r.read_u32(ncc)) { err = "truncated clipping_cubes count"; return false; }
+		out.clipping_cubes.resize(ncc);
+		for (uint32_t i = 0; i < ncc; ++i) {
+			ClippingCube& cc = out.clipping_cubes[i];
+			if (!r.read_f32(cc.pos.x) || !r.read_f32(cc.pos.y) || !r.read_f32(cc.pos.z)
+				|| !r.read_f32(cc.half_extents.x) || !r.read_f32(cc.half_extents.y)
+				|| !r.read_f32(cc.half_extents.z)) {
+				err = "truncated clipping_cube"; return false;
+			}
 		}
 	}
 

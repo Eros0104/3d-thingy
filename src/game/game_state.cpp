@@ -78,6 +78,48 @@ static bgfx::VertexBufferHandle build_wireframe_vbh(const std::vector<LitVertex>
   return bgfx::createVertexBuffer(mem, layout);
 }
 
+// Build a line-list VBH showing AABB edges for all clipping cubes.
+static bgfx::VertexBufferHandle build_clip_cube_vbh(
+    const std::vector<engine::ClippingCube> &cubes, uint32_t color) {
+  if (cubes.empty())
+    return BGFX_INVALID_HANDLE;
+
+  bgfx::VertexLayout layout;
+  layout.begin()
+      .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+      .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+      .end();
+
+  struct V { float x, y, z; uint32_t abgr; };
+  std::vector<V> verts;
+  verts.reserve(cubes.size() * 24); // 12 edges × 2 verts
+
+  for (const auto &cc : cubes) {
+    const float x0 = cc.pos.x - cc.half_extents.x, x1 = cc.pos.x + cc.half_extents.x;
+    const float y0 = cc.pos.y - cc.half_extents.y, y1 = cc.pos.y + cc.half_extents.y;
+    const float z0 = cc.pos.z - cc.half_extents.z, z1 = cc.pos.z + cc.half_extents.z;
+    // Bottom face
+    verts.push_back({x0,y0,z0,color}); verts.push_back({x1,y0,z0,color});
+    verts.push_back({x1,y0,z0,color}); verts.push_back({x1,y0,z1,color});
+    verts.push_back({x1,y0,z1,color}); verts.push_back({x0,y0,z1,color});
+    verts.push_back({x0,y0,z1,color}); verts.push_back({x0,y0,z0,color});
+    // Top face
+    verts.push_back({x0,y1,z0,color}); verts.push_back({x1,y1,z0,color});
+    verts.push_back({x1,y1,z0,color}); verts.push_back({x1,y1,z1,color});
+    verts.push_back({x1,y1,z1,color}); verts.push_back({x0,y1,z1,color});
+    verts.push_back({x0,y1,z1,color}); verts.push_back({x0,y1,z0,color});
+    // Verticals
+    verts.push_back({x0,y0,z0,color}); verts.push_back({x0,y1,z0,color});
+    verts.push_back({x1,y0,z0,color}); verts.push_back({x1,y1,z0,color});
+    verts.push_back({x1,y0,z1,color}); verts.push_back({x1,y1,z1,color});
+    verts.push_back({x0,y0,z1,color}); verts.push_back({x0,y1,z1,color});
+  }
+
+  const bgfx::Memory *mem =
+      bgfx::copy(verts.data(), uint32_t(verts.size() * sizeof(V)));
+  return bgfx::createVertexBuffer(mem, layout);
+}
+
 // ============================================================
 // Construction / destruction
 // ============================================================
@@ -154,6 +196,7 @@ bool GameState::init(const char *level_path, int width, int height) {
     wf_wall_vbh_  = build_wireframe_vbh(meshes.wall_vertices,  0xff44ff44u); // green
     wf_floor_vbh_ = build_wireframe_vbh(meshes.floor_vertices, 0xff44ccffu); // blue
     wf_stair_vbh_ = build_wireframe_vbh(meshes.stair_vertices, 0xffff8844u); // orange
+    wf_clip_vbh_  = build_clip_cube_vbh(level_.clipping_cubes, 0xffdd44aau); // magenta
   }
 
   // Shaders
@@ -313,6 +356,7 @@ void GameState::shutdown() {
   dvb(wf_wall_vbh_);
   dvb(wf_floor_vbh_);
   dvb(wf_stair_vbh_);
+  dvb(wf_clip_vbh_);
   dib(bulb_ibh_);
   dib(cube_ibh_);
 
@@ -946,6 +990,7 @@ void GameState::sys_render_wireframe() {
   draw(wf_wall_vbh_);
   draw(wf_floor_vbh_);
   draw(wf_stair_vbh_);
+  draw(wf_clip_vbh_);
 }
 
 void GameState::sys_render_hud() {

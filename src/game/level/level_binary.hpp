@@ -8,7 +8,7 @@
 
 namespace engine {
 
-/// Compact binary representation of a v5 `Level`. All fields little-endian.
+/// Compact binary representation of a v6 `Level`. All fields little-endian.
 ///
 ///   magic       : char[4]  = "EVIL"
 ///   version     : uint32   = 5
@@ -41,8 +41,12 @@ namespace engine {
 ///     color : float32[3]
 ///     intensity : float32
 ///     radius : float32        (v5+; defaults to 10.0 when loading v4)
+///   clipping_cubes_n : uint32   (v6+)
+///   for each clipping_cube:
+///     pos : float32[3]
+///     half_extents : float32[3]
 constexpr char k_evil_magic[4] = {'E', 'V', 'I', 'L'};
-constexpr uint32_t k_evil_version = 5;
+constexpr uint32_t k_evil_version = 6;
 
 void write_level_binary(const Level& level, std::vector<uint8_t>& out_bytes);
 bool parse_level_binary(const uint8_t* data, size_t size, Level& out, std::string& err);
