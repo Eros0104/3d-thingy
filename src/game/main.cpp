@@ -13,7 +13,8 @@
 int main(int argc, char **argv) {
   engine::log_init(engine::LogLevel::Debug);
 
-  const char *level_path = ENGINE_MAPS_DIR "/spencer_mansion_v3.json";
+  // const char *level_path = ENGINE_MAPS_DIR "/spencer_mansion_v3.evil";
+  const char *level_path = ENGINE_MAPS_DIR "/untitled.evil";
   if (argc >= 2)
     level_path = argv[1];
 

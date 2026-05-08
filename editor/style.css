@@ -94,10 +94,6 @@ main {
   border-color: var(--accent);
 }
 
-.chip-palette button[data-type="normal"] { border-left: 4px solid var(--wall-normal); }
-.chip-palette button[data-type="door"] { border-left: 4px solid var(--wall-door); }
-.chip-palette button[data-type="broken"] { border-left: 4px solid var(--wall-broken); }
-.chip-palette button[data-type="window"] { border-left: 4px solid var(--wall-window); }
 
 section label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
 section label input { flex: 1; }

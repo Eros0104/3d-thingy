@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>fps-engine level editor (v3)</title>
+  <title>fps-engine level editor</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>fps-engine level editor — walls + brushes</h1>
+    <h1>fps-engine level editor</h1>
     <div class="meta">
       <label>name <input id="level-name" type="text" value="untitled" /></label>
       <label>wall_height <input id="level-wall-height" type="number" step="0.1" value="3.2" /></label>
@@ -23,11 +23,7 @@
         <h2>tool</h2>
         <div id="tool-palette" class="tool-palette">
           <button data-tool="select">select / move</button>
-          <button data-tool="wall">draw wall</button>
-          <button data-tool="door">place door</button>
-          <button data-tool="window">place window</button>
-          <button data-tool="room">drag room</button>
-          <button data-tool="sector">draw sector</button>
+          <button data-tool="drag_room">drag room</button>
           <button data-tool="stair">place stair</button>
           <button data-tool="light">place light</button>
           <button data-tool="spawn">set spawn</button>
@@ -37,10 +33,9 @@
       </section>
 
       <section>
-        <h2>default Y / thickness</h2>
-        <label>floor_y <input id="default-floor-y" type="number" step="0.1" value="0.0" /></label>
+        <h2>defaults</h2>
+        <label>floor_y   <input id="default-floor-y"   type="number" step="0.1" value="0.0" /></label>
         <label>ceiling_y <input id="default-ceiling-y" type="number" step="0.1" value="3.2" /></label>
-        <label>wall thickness <input id="wall-thickness" type="number" step="0.05" value="0.2" min="0" /></label>
       </section>
 
       <section>
@@ -53,7 +48,7 @@
         <button id="export-json" class="primary" type="button">export .json</button>
         <button id="import-json" type="button">import .json</button>
         <input id="import-file" type="file" accept=".json" hidden />
-        <button id="load-mansion" type="button">load mansion.json</button>
+        <button id="load-mansion" type="button">load mansion</button>
       </section>
 
       <section>
@@ -66,15 +61,13 @@
       <canvas id="grid" width="1200" height="800"></canvas>
       <div class="legend">
         <span><span class="swatch" style="background:#78a4d6"></span>wall</span>
-        <span><span class="swatch" style="background:#f0a040"></span>door</span>
-        <span><span class="swatch" style="background:#44d4f0"></span>window</span>
-        <span><span class="swatch" style="background:#3a3f4f"></span>sector</span>
+        <span><span class="swatch" style="background:#3a3f4f;border:1px solid #555b73"></span>sector</span>
         <span><span class="swatch" style="background:#e8b84e"></span>stair</span>
         <span><span class="swatch" style="background:#f3e97a"></span>light</span>
         <span><span class="swatch" style="background:#8cff9c"></span>spawn</span>
       </div>
       <div class="canvas-shortcuts">
-        drag-mid or space+drag = pan &middot; wheel = zoom &middot; enter = close sector &middot; esc = cancel &middot; backspace = delete selection
+        drag-mid or space+drag = pan &middot; wheel = zoom &middot; enter = close sector &middot; esc = cancel &middot; backspace = delete
       </div>
     </section>
   </main>
