@@ -1,7 +1,6 @@
 #pragma once
 
 #include "engine/audio.hpp"
-#include "engine/collider.hpp"
 #include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
 #include "game/animator.hpp"

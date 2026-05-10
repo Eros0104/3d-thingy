@@ -76,6 +76,7 @@ void Zombie::update(float dt, game::Player& player, engine::JoltPhysics& jolt) {
         const float vel_z = pdz * inv * k_walk_speed;
         jolt.move_character(jolt_handle_, vert_state_, vel_x, vel_z, dt);
         jolt.get_character_pos(jolt_handle_, x, y, z);
+
         anim_.play(*model_, ZombieAnim::Walk, true, false);
     } else {
         damage_timer_ += dt;
@@ -90,25 +91,7 @@ void Zombie::update(float dt, game::Player& player, engine::JoltPhysics& jolt) {
         jolt.get_character_pos(jolt_handle_, x, y, z);
     }
 
-    // Push overlapping bodies apart (CharacterVirtual doesn't self-separate).
-    const float sep_dx   = x - camera.eyeX;
-    const float sep_dz   = z - camera.eyeZ;
-    const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
-    if (sep_dist > 0.f && sep_dist < k_min_sep) {
-        const float half_push = 0.5f * (k_min_sep - sep_dist) / sep_dist;
 
-        x           += sep_dx * half_push;
-        z           += sep_dz * half_push;
-        camera.eyeX -= sep_dx * half_push;
-        camera.eyeZ -= sep_dz * half_push;
-
-        // Sync teleported positions back into Jolt.
-        jolt.set_character_pos(jolt_handle_, x, y, z);
-
-        float px, py, pz;
-        jolt.get_character_pos(player.jolt_handle(), px, py, pz);
-        jolt.set_character_pos(player.jolt_handle(), camera.eyeX, py, camera.eyeZ);
-    }
 
     model_->update(dt);
 }

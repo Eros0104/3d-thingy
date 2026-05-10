@@ -113,6 +113,7 @@ add_executable(fps_engine
   src/engine/geometry/primitives.cpp
   src/engine/physics/raycast.cpp
   src/engine/physics/jolt_physics.cpp
+  src/engine/collision_system.cpp
   src/game/level/level_data.cpp
   src/game/level/level_loader.cpp
   src/game/level/json_level.cpp

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/collision_system.hpp"
 #include "engine/material.hpp"
 #include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
@@ -60,6 +61,7 @@ private:
   std::vector<std::unique_ptr<engine::RiggedModel>> models_;
 
   engine::JoltPhysics jolt_;
+  engine::CollisionSystem collision_system_;
   game::Player player_;
   std::vector<game::Zombie> zombies_;
   game::BloodParticleSystem particles_;

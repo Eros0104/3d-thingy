@@ -36,6 +36,9 @@ public:
 
     const engine::Collider& collider() const { return k_collider; }
 
+
+    engine::CharHandle jolt_handle() const { return jolt_handle_; }
+
     // Capsule segment endpoints for raycasting.
     void capsule(float out_a[3], float out_b[3]) const;
 

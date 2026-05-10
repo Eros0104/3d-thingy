@@ -349,6 +349,13 @@ bool GameState::init(const char *level_path, int width, int height) {
     door_.init_jolt(jolt_, door_params_);
   }
 
+  // Init systems
+  collision_system_ = engine::CollisionSystem(jolt_);
+  collision_system_.register_entity(&player_);
+
+  for (auto &z : zombies_)
+    collision_system_.register_entity(&z);
+
   return true;
 }
 
@@ -489,6 +496,7 @@ void GameState::update(float dt) {
   sys_interact_door();
   door_.update(dt);
   particles_.update(dt);
+  collision_system_.update();
 }
 
 // --- system: shoot ---
