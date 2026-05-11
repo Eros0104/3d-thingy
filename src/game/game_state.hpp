@@ -47,7 +47,6 @@ private:
   void sys_render_targets();
   void sys_render_characters();
   void sys_render_bullet_holes();
-  void sys_render_collision_debug();
   void sys_render_debug_lights();
   void sys_render_wireframe();
   void sys_render_hud();

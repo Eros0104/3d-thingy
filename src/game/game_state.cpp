@@ -350,7 +350,7 @@ bool GameState::init(const char *level_path, int width, int height) {
   }
 
   // Init systems
-  collision_system_ = engine::CollisionSystem(jolt_);
+  collision_system_ = engine::CollisionSystem(jolt_, debug_program_);
   collision_system_.register_entity(&player_);
 
   for (auto &z : zombies_)
@@ -475,7 +475,7 @@ void GameState::handle_event(const SDL_Event &event) {
     interact_pressed_ = true;
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c &&
       !event.key.repeat)
-    show_collision_ = !show_collision_;
+    collision_system_.toggle_debug_mode();
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_l &&
       !event.key.repeat)
     show_lights_ = !show_lights_;
@@ -605,12 +605,11 @@ void GameState::render(int width, int height) {
   particles_.render(0, debug_program_);
   if (show_wireframe_)
     sys_render_wireframe();
-  if (show_collision_)
-    sys_render_collision_debug();
   if (show_lights_)
     sys_render_debug_lights();
   sys_render_hud();
   sys_render_debug_text();
+  collision_system_.render(0);
 }
 
 void GameState::sys_set_lights() {
@@ -861,123 +860,6 @@ void GameState::sys_render_bullet_holes() {
   bgfx::submit(0, program_);
 }
 
-namespace {
-
-void draw_capsule_wireframe(bgfx::ViewId view_id, bgfx::ProgramHandle prog,
-                            float cx, float feet_y, float cz, float radius,
-                            float height, uint32_t abgr) {
-  if (!bgfx::isValid(prog))
-    return;
-
-  // N segments per full circle; N/2 per hemisphere arc.
-  // Layout: 2 equatorial circles + 4 vertical shaft lines + 4 hemisphere arcs
-  // (2 per end).
-  constexpr int N = 16;
-  constexpr int n_verts = N * 2 * 2 + 4 * 2 + 4 * (N / 2) * 2;
-
-  bgfx::VertexLayout layout;
-  layout.begin()
-      .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-      .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
-      .end();
-
-  if (bgfx::getAvailTransientVertexBuffer(n_verts, layout) < n_verts)
-    return;
-
-  bgfx::TransientVertexBuffer tvb;
-  bgfx::allocTransientVertexBuffer(&tvb, n_verts, layout);
-
-  struct V {
-    float x, y, z;
-    uint32_t abgr;
-  };
-  V *v = reinterpret_cast<V *>(tvb.data);
-  int idx = 0;
-
-  // Hemisphere sphere-centers: not the pole tips, but the equatorial ring
-  // positions.
-  const float bottom_y = feet_y + radius;       // center of bottom hemisphere
-  const float top_y = feet_y + height - radius; // center of top hemisphere
-  constexpr float k_2pi = 6.28318530717958647692f;
-  constexpr float k_pi = 3.14159265358979323846f;
-
-  // Equatorial circles at hemisphere centers (the widest cross-section of each
-  // cap).
-  auto circle = [&](float ring_y) {
-    for (int i = 0; i < N; ++i) {
-      const float a0 = float(i) / N * k_2pi;
-      const float a1 = float(i + 1) / N * k_2pi;
-      v[idx++] = {cx + radius * std::cos(a0), ring_y,
-                  cz + radius * std::sin(a0), abgr};
-      v[idx++] = {cx + radius * std::cos(a1), ring_y,
-                  cz + radius * std::sin(a1), abgr};
-    }
-  };
-  circle(bottom_y);
-  circle(top_y);
-
-  // Four vertical shaft lines connecting the two equatorial rings.
-  const float offsets[4][2] = {
-      {radius, 0}, {-radius, 0}, {0, radius}, {0, -radius}};
-  for (auto &o : offsets) {
-    v[idx++] = {cx + o[0], bottom_y, cz + o[1], abgr};
-    v[idx++] = {cx + o[0], top_y, cz + o[1], abgr};
-  }
-
-  // Hemisphere arcs in two perpendicular planes (XY and ZY) at each end.
-  // Bottom: sweeps θ from 0 → -π (downward from equatorial ring to pole).
-  // Top:    sweeps θ from 0 → +π (upward from equatorial ring to pole).
-  auto hemi_arc = [&](float center_y, float theta_start, float theta_end,
-                      bool z_axis) {
-    for (int i = 0; i < N / 2; ++i) {
-      const float a0 =
-          theta_start + float(i) / float(N / 2) * (theta_end - theta_start);
-      const float a1 =
-          theta_start + float(i + 1) / float(N / 2) * (theta_end - theta_start);
-      const float y0 = center_y + radius * std::sin(a0);
-      const float y1 = center_y + radius * std::sin(a1);
-      if (!z_axis) {
-        v[idx++] = {cx + radius * std::cos(a0), y0, cz, abgr};
-        v[idx++] = {cx + radius * std::cos(a1), y1, cz, abgr};
-      } else {
-        v[idx++] = {cx, y0, cz + radius * std::cos(a0), abgr};
-        v[idx++] = {cx, y1, cz + radius * std::cos(a1), abgr};
-      }
-    }
-  };
-  hemi_arc(bottom_y, 0.f, -k_pi, false);
-  hemi_arc(bottom_y, 0.f, -k_pi, true);
-  hemi_arc(top_y, 0.f, k_pi, false);
-  hemi_arc(top_y, 0.f, k_pi, true);
-
-  float mtx[16];
-  bx::mtxIdentity(mtx);
-  bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
-                 BGFX_STATE_PT_LINES | BGFX_STATE_DEPTH_TEST_LESS);
-  bgfx::setTransform(mtx);
-  bgfx::setVertexBuffer(0, &tvb);
-  bgfx::submit(view_id, prog);
-}
-
-} // namespace
-
-void GameState::sys_render_collision_debug() {
-  if (!bgfx::isValid(debug_program_))
-    return;
-
-  const FpsCamera &cam = player_.camera();
-  draw_capsule_wireframe(0, debug_program_, cam.eyeX,
-                         cam.eyeY - game::Player::k_eye_height, cam.eyeZ,
-                         game::Player::k_radius, game::Player::k_eye_height,
-                         0xff44ff44u);
-
-  for (const auto &z : zombies_) {
-    const engine::Collider &zc = z.collider();
-    draw_capsule_wireframe(0, debug_program_, z.x, z.y, z.z, zc.radius,
-                           zc.height, 0xff4444ffu);
-  }
-}
-
 void GameState::sys_render_debug_lights() {
   if (!bgfx::isValid(debug_program_))
     return;
@@ -1109,10 +991,16 @@ void GameState::sys_render_debug_text() {
       "WASD  Mouse  Esc: %s   G: gizmo=%s   C: collision=%s   "
       "L: lights=%s   Z: wireframe=%s   LMB:Shoot R:Reload",
       player_.mouse_look() ? "free cursor" : "capture",
-      player_.show_axes_gizmo() ? "on" : "off", show_collision_ ? "on" : "off",
-      show_lights_ ? "on" : "off", show_wireframe_ ? "on" : "off");
-  bgfx::dbgTextPrintf(0, 2, 0x0f, "level=%s  sectors=%zu walls=%zu stairs=%zu",
-                      level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
-                      level_.sectors.size(), level_.walls.size(),
-                      level_.stairs.size());
+      player_.show_axes_gizmo() ? "on" : "off", 
+      collision_system_.is_debug_mode() ? "on" : "off",
+      show_lights_ ? "on" : "off", show_wireframe_ ? "on" : "off"
+  );
+  bgfx::dbgTextPrintf(
+      0, 2, 
+      0x0f,
+      "level=%s  sectors=%zu walls=%zu stairs=%zu",
+      level_.name.empty() ? "(unnamed)" : level_.name.c_str(),
+      level_.sectors.size(), level_.walls.size(),
+      level_.stairs.size()
+  );
 }
