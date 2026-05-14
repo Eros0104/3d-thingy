@@ -128,6 +128,9 @@ add_executable(fps_engine
   src/game/zombie.cpp
   src/game/particles.cpp
   src/game/door.cpp
+  src/game/combat_system.cpp
+  src/game/ai_system.cpp
+  src/game/interact_system.cpp
   src/engine/window.cpp
   src/engine/hud.cpp
   shaders/vs_triangle.sc

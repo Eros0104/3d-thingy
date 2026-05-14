@@ -101,33 +101,34 @@ void draw_capsule_wireframe(bgfx::ViewId view_id, bgfx::ProgramHandle prog,
 
 namespace engine {
 
-CollisionSystem::CollisionSystem(engine::JoltPhysics &jolt, bgfx::ProgramHandle debug_prog)
-    : jolt_(&jolt), debug_prog_(debug_prog) {}
+CollisionSystem::CollisionSystem(engine::JoltPhysics& jolt, bgfx::ProgramHandle debug_prog,
+                                 game::Player& player, std::vector<game::Zombie>& zombies)
+    : jolt_(&jolt), debug_prog_(debug_prog), player_(&player), zombies_(&zombies) {}
 
 CollisionSystem::~CollisionSystem() = default;
 
 void CollisionSystem::update() {
-  for (auto z : zombies_) {
-    if (!z->alive()) continue;
+  for (auto& z : *zombies_) {
+    if (!z.alive()) continue;
 
     FpsCamera p_cam = player_->camera();
 
-    const float sep_dx   = z->x - p_cam.eyeX;
+    const float sep_dx   = z.x - p_cam.eyeX;
     // Push overlapping bodies apart (CharacterVirtual doesn't self-separate).
-    const float sep_dz   = z->z - p_cam.eyeZ;
+    const float sep_dz   = z.z - p_cam.eyeZ;
     const float sep_dist = std::sqrt(sep_dx * sep_dx + sep_dz * sep_dz);
-    const float     k_min_sep         = z->k_collider.radius + player_->k_radius;
+    const float k_min_sep = z.k_collider.radius + player_->k_radius;
 
     if (sep_dist > 0.f && sep_dist < k_min_sep) {
         const float half_push = 0.5f * (k_min_sep - sep_dist) / sep_dist;
 
-        z->x        += sep_dx * half_push;
-        z->z        += sep_dz * half_push;
+        z.x        += sep_dx * half_push;
+        z.z        += sep_dz * half_push;
         p_cam.eyeX -= sep_dx * half_push;
         p_cam.eyeZ -= sep_dz * half_push;
 
         // Sync teleported positions back into Jolt.
-        jolt_->set_character_pos(z->jolt_handle(), z->x, z->y, z->z);
+        jolt_->set_character_pos(z.jolt_handle(), z.x, z.y, z.z);
 
         float px, py, pz;
         jolt_->get_character_pos(player_->jolt_handle(), px, py, pz);
@@ -137,31 +138,22 @@ void CollisionSystem::update() {
 }
 
 void CollisionSystem::render(bgfx::ViewId view_id) {
-  bgfx::ProgramHandle prog = debug_prog_;
   if (!debug_mode) return;
 
-  const FpsCamera &cam = player_->camera();
+  const FpsCamera& cam = player_->camera();
   draw_capsule_wireframe(
-      view_id, prog,
+      view_id, debug_prog_,
       cam.eyeX, cam.eyeY - game::Player::k_eye_height, cam.eyeZ,
       game::Player::k_radius, game::Player::k_eye_height,
       0xff44ff44u
   );
 
-  for (const auto &z : zombies_) {
-    const engine::Collider &zc = z->collider();
+  for (const auto& z : *zombies_) {
+    const engine::Collider& zc = z.collider();
     draw_capsule_wireframe(
-        view_id, prog, z->x, z->y, z->z, zc.radius, zc.height, 0xff4444ffu
+        view_id, debug_prog_, z.x, z.y, z.z, zc.radius, zc.height, 0xff4444ffu
     );
   }
-}
-
-void CollisionSystem::register_entity(game::Player* p) {
-  player_ = p;
-}
-
-void CollisionSystem::register_entity(game::Zombie* z) {
-  zombies_.push_back(z);
 }
 
 bool CollisionSystem::is_debug_mode() { return debug_mode; }

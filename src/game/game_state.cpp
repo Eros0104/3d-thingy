@@ -6,7 +6,6 @@
 #include "engine/lit_vertex.hpp"
 #include "engine/log.hpp"
 #include "engine/physics/jolt_physics.hpp"
-#include "engine/physics/raycast.hpp"
 #include "engine/render/buffers.hpp"
 #include "engine/shader_program.hpp"
 #include "engine/texture_loader.hpp"
@@ -28,7 +27,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <limits>
 
 #ifndef ENGINE_TEXTURES_DIR
 #define ENGINE_TEXTURES_DIR "textures"
@@ -350,11 +348,10 @@ bool GameState::init(const char *level_path, int width, int height) {
   }
 
   // Init systems
-  collision_system_ = engine::CollisionSystem(jolt_, debug_program_);
-  collision_system_.register_entity(&player_);
-
-  for (auto &z : zombies_)
-    collision_system_.register_entity(&z);
+  combat_system_    = game::CombatSystem(jolt_, particles_, player_, zombies_);
+  ai_system_        = game::AISystem(jolt_, player_, zombies_);
+  interact_system_  = game::InteractSystem(player_, door_, door_params_.pos[0], door_params_.pos[2]);
+  collision_system_ = engine::CollisionSystem(jolt_, debug_program_, player_, zombies_);
 
   return true;
 }
@@ -472,7 +469,7 @@ void GameState::handle_event(const SDL_Event &event) {
   player_.handle_event(event);
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_e &&
       !event.key.repeat)
-    interact_pressed_ = true;
+    interact_system_.on_interact();
   if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c &&
       !event.key.repeat)
     collision_system_.toggle_debug_mode();
@@ -491,83 +488,12 @@ void GameState::handle_event(const SDL_Event &event) {
 void GameState::update(float dt) {
   jolt_.update(dt);
   player_.update(dt, jolt_);
-  sys_shooting();
-  sys_zombie_ai(dt);
-  sys_interact_door();
+  combat_system_.update();
+  ai_system_.update(dt);
+  interact_system_.update();
   door_.update(dt);
   particles_.update(dt);
   collision_system_.update();
-}
-
-// --- system: shoot ---
-
-void GameState::sys_shooting() {
-  float fx, fy, fz;
-  if (!player_.try_fire(fx, fy, fz))
-    return;
-
-  const FpsCamera &cam = player_.camera();
-  constexpr float k_max_ray = 500.f;
-
-  // Level geometry raycast via Jolt.
-  engine::JoltRayHit jolt_hit;
-  const bool wall_hit = jolt_.cast_ray_level(cam.eyeX, cam.eyeY, cam.eyeZ, fx,
-                                             fy, fz, k_max_ray, jolt_hit);
-  const float wall_t = jolt_hit.t;
-
-  float best_t = wall_hit ? wall_t : std::numeric_limits<float>::infinity();
-
-  // Zombies: capsule test, only if closer than wall/target.
-  for (auto &z : zombies_) {
-    if (!z.alive())
-      continue;
-    float ca[3], cb[3];
-    z.capsule(ca, cb);
-    float t_hit;
-    if (engine::ray_capsule(cam.eyeX, cam.eyeY, cam.eyeZ, fx, fy, fz, ca[0],
-                            ca[1], ca[2], cb[0], cb[1], cb[2],
-                            game::Zombie::k_collider.radius, t_hit) &&
-        t_hit < best_t) {
-      best_t = t_hit;
-      z.take_damage(10);
-      particles_.spawn(cam.eyeX + fx * t_hit, cam.eyeY + fy * t_hit,
-                       cam.eyeZ + fz * t_hit, 25);
-    }
-  }
-
-  // Bullet hole on wall if level was the closest hit.
-  if (wall_hit && best_t >= wall_t - 1e-4f) {
-    constexpr float k_offset = 0.005f; // small offset to avoid z-fighting
-    constexpr int k_max = 200;
-    bullet_holes_.push_back({cam.eyeX + fx * wall_t + jolt_hit.nx * k_offset,
-                             cam.eyeY + fy * wall_t + jolt_hit.ny * k_offset,
-                             cam.eyeZ + fz * wall_t + jolt_hit.nz * k_offset,
-                             jolt_hit.nx, jolt_hit.ny, jolt_hit.nz});
-    if (int(bullet_holes_.size()) > k_max)
-      bullet_holes_.erase(bullet_holes_.begin());
-  }
-}
-
-// --- system: zombie AI ---
-
-void GameState::sys_zombie_ai(float dt) {
-  for (auto &z : zombies_)
-    z.update(dt, player_, jolt_);
-}
-
-// --- system: door interaction ---
-
-void GameState::sys_interact_door() {
-  constexpr float k_interact_radius = 2.0f;
-  const FpsCamera &cam = player_.camera();
-  const float dx = cam.eyeX - door_params_.pos[0];
-  const float dz = cam.eyeZ - door_params_.pos[2];
-  near_door_ = (dx * dx + dz * dz) < (k_interact_radius * k_interact_radius);
-
-  if (interact_pressed_ && near_door_) {
-    door_.is_open() ? door_.close() : door_.open();
-  }
-  interact_pressed_ = false;
 }
 
 // ============================================================
@@ -766,10 +692,11 @@ void GameState::sys_render_characters() {
 }
 
 void GameState::sys_render_bullet_holes() {
-  if (bullet_holes_.empty() || !bgfx::isValid(program_))
+  const auto& bullet_holes = combat_system_.bullet_holes();
+  if (bullet_holes.empty() || !bgfx::isValid(program_))
     return;
 
-  const uint32_t n = uint32_t(bullet_holes_.size());
+  const uint32_t n = uint32_t(bullet_holes.size());
   const uint32_t n_verts = n * 4;
   const uint32_t n_indices = n * 6;
   if (bgfx::getAvailTransientVertexBuffer(n_verts, layout_) < n_verts)
@@ -788,7 +715,7 @@ void GameState::sys_render_bullet_holes() {
   constexpr float k_hs = 0.08f; // half-size in metres
 
   for (uint32_t i = 0; i < n; ++i) {
-    const BulletHole &h = bullet_holes_[i];
+    const game::BulletHole &h = bullet_holes[i];
 
     // Build a tangent frame on the hit surface.
     // right = cross(normal, up_ref); up_in_plane = cross(right, normal)
@@ -971,7 +898,7 @@ void GameState::sys_render_hud() {
   engine::hud_draw_text_right(buf, float(width_) - margin_x, baseline_y,
                               k_hud_red);
 
-  if (near_door_) {
+  if (interact_system_.near_door()) {
     const char *hint = door_.is_open() ? "[E] Close door" : "[E] Open door";
     const float hint_y = float(height_) * 0.5f + 40.f;
     engine::hud_draw_text(hint, float(width_) * 0.5f - 56.f, hint_y,

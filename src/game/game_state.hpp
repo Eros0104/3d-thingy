@@ -4,7 +4,10 @@
 #include "engine/material.hpp"
 #include "engine/physics/jolt_physics.hpp"
 #include "engine/rigged_model.hpp"
+#include "game/ai_system.hpp"
+#include "game/combat_system.hpp"
 #include "game/door.hpp"
+#include "game/interact_system.hpp"
 #include "game/level/level_data.hpp"
 #include "game/particles.hpp"
 #include "game/player.hpp"
@@ -39,9 +42,6 @@ private:
 
   engine::RiggedModel *load_model(const char *path, std::string &err);
 
-  void sys_shooting();
-  void sys_zombie_ai(float dt);
-  void sys_interact_door();
   void sys_set_lights();
   void sys_render_level();
   void sys_render_targets();
@@ -52,23 +52,19 @@ private:
   void sys_render_hud();
   void sys_render_debug_text();
 
-  struct BulletHole {
-    float x, y, z, nx, ny, nz;
-  };
-
   // Owned model pool — RiggedModel is non-copyable so stored via unique_ptr.
   std::vector<std::unique_ptr<engine::RiggedModel>> models_;
 
   engine::JoltPhysics jolt_;
   engine::CollisionSystem collision_system_;
+  game::CombatSystem combat_system_;
+  game::AISystem ai_system_;
+  game::InteractSystem interact_system_;
   game::Player player_;
   std::vector<game::Zombie> zombies_;
   game::BloodParticleSystem particles_;
   Door door_;
   engine::ModelDrawParams door_params_{};
-  bool near_door_         = false;
-  bool interact_pressed_  = false;
-  std::vector<BulletHole> bullet_holes_;
 
   // --- level ---
   engine::Level level_{};
