@@ -103,36 +103,36 @@ FetchContent_MakeAvailable(JoltPhysics)
 set(SHADER_GEN_DIR "${CMAKE_BINARY_DIR}/generated/shaders")
 
 add_executable(fps_engine
-  src/game/main.cpp
-  src/game/game_state.cpp
-  src/engine/application/application.cpp
-  src/engine/renderer/renderer.cpp
-  src/engine/audio.cpp
-  src/engine/log.cpp
-  src/game/fps_camera.cpp
-  src/engine/geometry/primitives.cpp
-  src/engine/physics/raycast.cpp
-  src/engine/physics/jolt_physics.cpp
-  src/engine/collision_system.cpp
-  src/game/level/level_data.cpp
-  src/game/level/level_loader.cpp
-  src/game/level/json_level.cpp
-  src/game/level/level_mesh.cpp
-  src/game/level/level_binary.cpp
-  src/engine/shader_program.cpp
-  src/engine/texture_loader.cpp
-  src/engine/rigged_model.cpp
-  src/engine/model.cpp
-  src/game/animator.cpp
-  src/game/player.cpp
-  src/game/zombie.cpp
-  src/game/particles.cpp
-  src/game/door.cpp
-  src/game/combat_system.cpp
-  src/game/ai_system.cpp
-  src/game/interact_system.cpp
-  src/engine/window.cpp
-  src/engine/hud.cpp
+  src/main.cpp
+  src/game_state.cpp
+  src/app/application.cpp
+  src/app/window.cpp
+  src/app/log.cpp
+  src/audio/audio.cpp
+  src/render/renderer.cpp
+  src/render/primitives.cpp
+  src/render/shader_program.cpp
+  src/render/texture_loader.cpp
+  src/render/rigged_model.cpp
+  src/render/model.cpp
+  src/render/hud.cpp
+  src/physics/raycast.cpp
+  src/physics/jolt_physics.cpp
+  src/level/level_data.cpp
+  src/level/level_loader.cpp
+  src/level/json_level.cpp
+  src/level/level_mesh.cpp
+  src/level/level_binary.cpp
+  src/entities/fps_camera.cpp
+  src/entities/animator.cpp
+  src/entities/player.cpp
+  src/entities/zombie.cpp
+  src/entities/particles.cpp
+  src/entities/door.cpp
+  src/systems/collision_system.cpp
+  src/systems/combat_system.cpp
+  src/systems/ai_system.cpp
+  src/systems/interact_system.cpp
   shaders/vs_triangle.sc
   shaders/fs_triangle.sc
   shaders/vs_skinned.sc
@@ -171,9 +171,9 @@ target_link_libraries(fps_engine PRIVATE
 
 add_executable(level_pack
   src/tools/level_pack.cpp
-  src/game/level/level_data.cpp
-  src/game/level/json_level.cpp
-  src/game/level/level_binary.cpp
+  src/level/level_data.cpp
+  src/level/json_level.cpp
+  src/level/level_binary.cpp
 )
 
 target_include_directories(level_pack PRIVATE
